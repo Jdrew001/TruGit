@@ -29,6 +29,7 @@
 		A00000000000000000000128 /* ConflictDiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000129 /* ConflictDiffView.swift */; };
 		A00000000000000000000130 /* MergeEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000131 /* MergeEditor.swift */; };
 		A00000000000000000000132 /* CommitTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000133 /* CommitTable.swift */; };
+		3C1933527329441BB61E834F /* GraphReferencePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F02D450B97944E388529FA7 /* GraphReferencePreview.swift */; };
 		A00000000000000000000134 /* RepositoryEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000135 /* RepositoryEvents.swift */; };
 		A00000000000000000000136 /* WorktreeAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000137 /* WorktreeAction.swift */; };
 		A00000000000000000000138 /* WorktreePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000139 /* WorktreePanel.swift */; };
@@ -76,6 +77,7 @@
 		A00000000000000000000129 /* ConflictDiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConflictDiffView.swift; sourceTree = "<group>"; };
 		A00000000000000000000131 /* MergeEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MergeEditor.swift; sourceTree = "<group>"; };
 		A00000000000000000000133 /* CommitTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitTable.swift; sourceTree = "<group>"; };
+		8F02D450B97944E388529FA7 /* GraphReferencePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphReferencePreview.swift; sourceTree = "<group>"; };
 		A00000000000000000000135 /* RepositoryEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryEvents.swift; sourceTree = "<group>"; };
 		A00000000000000000000137 /* WorktreeAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeAction.swift; sourceTree = "<group>"; };
 		A00000000000000000000139 /* WorktreePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreePanel.swift; sourceTree = "<group>"; };
@@ -173,6 +175,7 @@
 				A00000000000000000000013 /* GitHistory.swift */,
 				A00000000000000000000015 /* CommitGraph.swift */,
 				A00000000000000000000133 /* CommitTable.swift */,
+				8F02D450B97944E388529FA7 /* GraphReferencePreview.swift */,
 			);
 			path = History;
 			sourceTree = "<group>";
@@ -331,6 +334,7 @@
 				A00000000000000000000128 /* ConflictDiffView.swift in Sources */,
 				A00000000000000000000130 /* MergeEditor.swift in Sources */,
 				A00000000000000000000132 /* CommitTable.swift in Sources */,
+				3C1933527329441BB61E834F /* GraphReferencePreview.swift in Sources */,
 				A00000000000000000000134 /* RepositoryEvents.swift in Sources */,
 				A00000000000000000000136 /* WorktreeAction.swift in Sources */,
 				A00000000000000000000138 /* WorktreePanel.swift in Sources */,

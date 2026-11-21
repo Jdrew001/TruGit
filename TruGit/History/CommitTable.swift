@@ -55,6 +55,7 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
     let createTag: (RevisionPoint) -> Void
     let canAct: Bool
     let onDrop: (BranchDrag, RevisionPoint) -> Bool
+    let expandedBadges: ([RepositoryReference], CGFloat) -> AnyView
     @ViewBuilder let badges: ([RepositoryReference]) -> Badges
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -62,10 +63,13 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let table = HistoryTableView()
         table.branchMenu = { [weak coordinator = context.coordinator] index, ref in coordinator?.branchMenu(at: index, clicked: ref) }
+        table.hoverReferences = { [weak coordinator = context.coordinator] row in
+            guard let coordinator, let point = coordinator.point(at: row), let refs = coordinator.refs[point.oid] else { return nil }
+            return (refs, { coordinator.parent.expandedBadges(refs, $0) })
+        }
         table.root = snapshot.repository.root
-        table.rowPoint = { [weak coordinator = context.coordinator] in coordinator?.point(at: $0) }
         table.setDraggingSourceOperationMask(.copy, forLocal: true)
-        table.registerForDraggedTypes([BranchDrag.commitType])
+        table.registerForDraggedTypes([BranchDrag.commitType, BranchDrag.referenceType])
         table.allowsMultipleSelection = true
         table.style = .plain
         table.headerView = nil
@@ -96,6 +100,9 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
         guard let table = scroll.documentView as? NSTableView else { return }
         let coordinator = context.coordinator
         let layoutChanged = coordinator.parent.columns != columns
+        if layoutChanged || coordinator.graphID != graph.id || coordinator.snapshotID != snapshot.id {
+            (table as? HistoryTableView)?.referencePreview.dismiss()
+        }
         coordinator.parent = self
         coordinator.updating = true
         defer { coordinator.updating = false }
@@ -221,29 +228,38 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
             (tableView as? HistoryTableView)?.draggedCommits = nil
         }
 
-        private func localDestination(at row: Int, info: NSDraggingInfo, table: NSTableView) -> RevisionPoint? {
+        private func drop(at info: NSDraggingInfo, table: NSTableView) -> (drag: BranchDrag, target: RevisionPoint, row: Int)? {
+            let location = table.convert(info.draggingLocation, from: nil)
+            let row = table.row(at: location)
+            guard parent.canAct, let drag = BranchDrag.local(from: info, in: parent.snapshot.repository.root) else { return nil }
+            let target: RevisionPoint
             if let ref = BranchMouseView.reference(at: info.draggingLocation, window: table.window) {
-                return ref.kind == .local ? RevisionPoint(ref) : nil
-            }
-            guard let point = point(at: row),
-                  let local = refs[point.oid]?.first(where: { $0.kind == .local }) else { return nil }
-            return RevisionPoint(local)
+                target = RevisionPoint(ref)
+            } else if let point = point(at: row) {
+                let references = refs[point.oid] ?? []
+                if drag.commits.isEmpty {
+                    let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? CommitCell
+                    let overLabelOrNode = cell.flatMap { $0.hoverAnchor(at: $0.convert(location, from: table)) } != nil
+                    target = overLabelOrNode ? references.first.map(RevisionPoint.init) ?? point : point
+                } else {
+                    guard let branch = references.first(where: { $0.kind == .local }) else { return nil }
+                    target = RevisionPoint(branch)
+                }
+            } else { return nil }
+            return drag.canDrop(on: target) ? (drag, target, row) : nil
         }
 
         func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int,
                        proposedDropOperation operation: NSTableView.DropOperation) -> NSDragOperation {
-            let hovered = tableView.row(at: tableView.convert(info.draggingLocation, from: nil))
-            guard parent.canAct, BranchDrag.commit(from: info, in: parent.snapshot.repository.root) != nil,
-                  localDestination(at: hovered, info: info, table: tableView) != nil else { return [] }
-            tableView.setDropRow(hovered, dropOperation: .on)
+            guard let drop = drop(at: info, table: tableView) else { return [] }
+            tableView.setDropRow(drop.row, dropOperation: .on)
             return .copy
         }
 
         func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int,
                        dropOperation: NSTableView.DropOperation) -> Bool {
-            guard let drag = BranchDrag.commit(from: info, in: parent.snapshot.repository.root),
-                  let target = localDestination(at: row, info: info, table: tableView) else { return false }
-            return parent.onDrop(drag, target)
+            guard let drop = drop(at: info, table: tableView) else { return false }
+            return parent.onDrop(drop.drag, drop.target)
         }
 
         func branchMenu(at row: Int, clicked: RepositoryReference?) -> NSMenu? {
@@ -348,19 +364,107 @@ final class HistoryTableView: NSTableView {
     private static let tables = NSHashTable<HistoryTableView>.weakObjects()
     var root: URL?
     var draggedCommits: BranchDrag?
-    var rowPoint: ((Int) -> RevisionPoint?)?
+
+    let referencePreview = GraphReferencePreview()
+    var hoverReferences: ((Int) -> ([RepositoryReference], (CGFloat) -> AnyView)?)?
+    private var departingCommit: String?
+    private var mouseMonitor: Any?
+    private var hoverArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.inVisibleRect, .mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        if NSEvent.pressedMouseButtons == 0, event.trackingArea === hoverArea, let window,
+           !referencePreview.contains(event.locationInWindow, in: window) {
+            referencePreview.dismiss()
+        }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor); self.mouseMonitor = nil }
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window)
+        NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: enclosingScrollView?.contentView)
+        referencePreview.dismiss()
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    @objc private func dismissPreview(_ notification: Notification) { referencePreview.dismiss() }
+
+    private func updatePreview(for event: NSEvent) {
+        if event.type == .keyDown { referencePreview.dismiss(); return }
+        if referencePreview.contains(event.locationInWindow, in: event.window) {
+            if event.type == .mouseMoved {
+                referencePreview.updateHighlight(at: event.locationInWindow, in: event.window)
+            } else if event.type == .scrollWheel {
+                if referencePreview.scrolls {
+                    // Resolve the row after the scroll view processes this event.
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, let window = self.window else { return }
+                        self.referencePreview.updateHighlight(at: window.mouseLocationOutsideOfEventStream, in: window)
+                    }
+                } else { referencePreview.dismiss() }
+            }
+            return
+        }
+        guard event.type == .mouseMoved, let window, event.window === window, window.isKeyWindow,
+              NSEvent.pressedMouseButtons == 0, !isHiddenOrHasHiddenAncestor else { referencePreview.dismiss(); return }
+        showReferences(at: event.locationInWindow)
+    }
+
+    private func showReferences(at windowPoint: NSPoint) {
+        let location = convert(windowPoint, from: nil)
+        let index = row(at: location)
+        guard visibleRect.contains(location), index >= 0, let cell = view(atColumn: 0, row: index, makeIfNecessary: false) as? CommitCell,
+              let anchor = cell.hoverAnchor(at: cell.convert(location, from: self)),
+              let (refs, content) = hoverReferences?(index) else {
+            departingCommit = nil
+            referencePreview.dismiss()
+            return
+        }
+        // Let the pointer leave the source badge before opening that stack again.
+        if let departingCommit, departingCommit == refs.first?.commitID { return }
+        departingCommit = nil
+        referencePreview.hover(refs, anchor: convert(anchor, from: cell), in: self, content: content)
+        referencePreview.updateHighlight(at: windowPoint, in: window)
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window != nil { Self.tables.add(self) } else { Self.tables.remove(self) }
+        guard let window else { Self.tables.remove(self); return }
+        Self.tables.add(self)
+        NotificationCenter.default.addObserver(self, selector: #selector(dismissPreview(_:)), name: NSWindow.didResignKeyNotification, object: window)
+        if let clip = enclosingScrollView?.contentView {
+            NotificationCenter.default.addObserver(self, selector: #selector(dismissPreview(_:)), name: NSView.boundsDidChangeNotification, object: clip)
+        }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .rightMouseDown, .scrollWheel, .keyDown]) { [weak self] event in
+            self?.updatePreview(for: event)
+            return event
+        }
     }
 
-    static func revision(at event: NSEvent, in root: URL) -> RevisionPoint? {
-        for table in tables.allObjects where table.window === event.window && table.root == root && !table.isHiddenOrHasHiddenAncestor {
-            let point = table.convert(event.locationInWindow, from: nil)
-            if table.visibleRect.contains(point) { return table.rowPoint?(table.row(at: point)) }
+    static func updateDragPreview(in window: NSWindow?, repository: URL, at screenPoint: NSPoint?, leaving source: String? = nil) {
+        guard let window else { return }
+        for table in tables.allObjects where table.window === window && table.root == repository && !table.isHiddenOrHasHiddenAncestor {
+            guard let screenPoint else {
+                table.departingCommit = source
+                table.referencePreview.dismiss()
+                continue
+            }
+            let location = window.convertPoint(fromScreen: screenPoint)
+            if table.referencePreview.contains(location, in: window) {
+                table.referencePreview.updateHighlight(at: location, in: window)
+            } else {
+                table.showReferences(at: location)
+            }
         }
-        return nil
     }
 
     var branchMenu: ((Int, RepositoryReference?) -> NSMenu?)?
@@ -456,13 +560,24 @@ private final class CommitCell: NSTableCellView {
         date.isHidden = c.date == 0
     }
 
+    private func graphX(lane: Int) -> CGFloat {
+        let step = min(23, max(0, columns.graph - 26) / CGFloat(max(1, lanes - 1)))
+        return columns.refs + 13 + CGFloat(lane) * step
+    }
+
+    func hoverAnchor(at location: NSPoint) -> NSRect? {
+        guard let host, let row else { return nil }
+        if host.frame.contains(location) { return host.frame }
+        let node = NSRect(x: graphX(lane: row.column) - 11, y: bounds.midY - 11, width: 22, height: 22)
+        return node.contains(location) ? host.frame : nil
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let row, let cg = NSGraphicsContext.current?.cgContext else { return }
         let c = columns
-        let step = min(23, max(0, c.graph - 26) / CGFloat(max(1, lanes - 1)))
         func point(_ lane: Int, _ height: Double) -> CGPoint {
-            CGPoint(x: c.refs + 13 + CGFloat(lane) * step, y: bounds.height * height)
+            CGPoint(x: graphX(lane: lane), y: bounds.height * height)
         }
         let center = point(row.column, 0.5)
         let stripe = CGRect(x: center.x, y: 3, width: max(0, c.refs + c.graph - center.x), height: bounds.height - 6)

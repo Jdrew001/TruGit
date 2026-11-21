@@ -12,4 +12,12 @@ Compared the supplied wide GitKraken workspace and branch-label crop with native
 
 The test repository has fewer commits and references than the screenshot. Hosted account, team, and issue panels are outside this local Git workspace.
 
+## Graph label hover
+
+Compared the supplied branch hover crop with a native TruGit window using the same current branch name and a remote release branch. The expanded badge starts at the compact label’s top-left corner. Two references occupy two 24-point rows. The checkmark, full branch name, and repository-type icon fit on one line. TruGit retains the remote prefix so the destination is visible.
+
+Tested hover on a label, the overflow count, and the corresponding graph node. Moving away collapsed the stack without changing graph selection. Hit testing resolved the expanded local and remote rows separately. A second fixture with 19 references showed a scrollable stack.
+
 final result: passed
+
+An AppKit integration check opened the stack on the first hover event. It dragged the second local branch out of one stack and delivered the drop to the second branch in another. The check drove the native drag callbacks in-process and verified that Branch Actions offered merge into the destination and rebase onto the destination.

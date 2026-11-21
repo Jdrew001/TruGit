@@ -7,10 +7,17 @@ struct BranchDrag {
     var commits: [GitCommit] = []
     static let commitType = NSPasteboard.PasteboardType("com.drewatkison.TruGit.commit")
 
-    @MainActor static func commit(from info: NSDraggingInfo, in root: URL) -> Self? {
-        guard let table = info.draggingSource as? HistoryTableView,
-              let drag = table.draggedCommits, drag.repository == root else { return nil }
+    static let referenceType = NSPasteboard.PasteboardType("com.drewatkison.TruGit.reference")
+
+    @MainActor static func local(from info: NSDraggingInfo, in root: URL) -> Self? {
+        let drag = (info.draggingSource as? BranchDragSession)?.drag
+            ?? (info.draggingSource as? HistoryTableView)?.draggedCommits
+        guard let drag, drag.repository == root else { return nil }
         return drag
+    }
+
+    func canDrop(on target: RevisionPoint) -> Bool {
+        source.id != target.id && (source.isLocal || target.isLocal)
     }
 }
 
@@ -49,23 +56,35 @@ final class BranchMouseView: NSView {
     }
 
     static func reference(at location: NSPoint, window: NSWindow?) -> RepositoryReference? {
-        surfaces.allObjects.first { view in
+        surface(at: location, window: window)?.control.reference
+    }
+
+    private static func surface(at location: NSPoint, window: NSWindow?) -> BranchMouseView? {
+        guard let root = window?.contentView else { return nil }
+        let point = root.superview?.convert(location, from: nil) ?? location
+        var hit = root.hitTest(point)
+        if let surface = hit as? BranchMouseView { return surface }
+        // A secondary click passes through our mouse surface to its SwiftUI menu.
+        // Resolve overlapping graph badges in the frontmost hit view's subtree first.
+        let candidates = surfaces.allObjects.filter { view in
             view.window === window && !view.isHiddenOrHasHiddenAncestor &&
-                view.bounds.intersection(view.visibleRect).contains(view.convert(location, from: nil))
-        }?.control.reference
+                view.visibleRect.contains(view.convert(location, from: nil))
+        }
+        while let view = hit {
+            if let match = candidates.first(where: { $0.isDescendant(of: view) }) { return match }
+            hit = view.superview
+        }
+        return nil
     }
 
     var control: BranchDragControl
     private var start: NSPoint?
-    private weak var highlightedTarget: BranchMouseView?
-    private var preview: NSTextField?
-
     init(control: BranchDragControl) {
         self.control = control
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 4
-        registerForDraggedTypes([BranchDrag.commitType])
+        registerForDraggedTypes([BranchDrag.commitType, BranchDrag.referenceType])
         Self.surfaces.add(self)
     }
 
@@ -83,45 +102,42 @@ final class BranchMouseView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        clearDrag()
         start = event.locationInWindow
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let start, moved(from: start, to: event.locationInWindow) || preview != nil else { return }
-        let target = destination(at: event.locationInWindow)
-        if highlightedTarget !== target {
-            highlightedTarget?.layer?.borderWidth = 0
-            highlightedTarget = target
-            target?.layer?.borderColor = NSColor.controlAccentColor.cgColor
-            target?.layer?.borderWidth = 2
+        guard let start, let window, hypot(event.locationInWindow.x - start.x, event.locationInWindow.y - start.y) >= 4 else { return }
+        self.start = nil
+        let drag = BranchDrag(repository: control.repository, source: RevisionPoint(control.reference))
+        let writer = NSPasteboardItem()
+        writer.setString(drag.source.id, forType: BranchDrag.referenceType)
+        let item = NSDraggingItem(pasteboardWriter: writer)
+        let label = NSAttributedString(string: drag.source.name, attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white
+        ])
+        let size = NSSize(width: ceil(label.size().width) + 16, height: 24)
+        let image = NSImage(size: size, flipped: false) { rect in
+            NSColor.selectedContentBackgroundColor.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
+            label.draw(at: NSPoint(x: 8, y: (rect.height - label.size().height) / 2))
+            return true
         }
-        if let contentView = window?.contentView {
-            let label = preview ?? makePreview(in: contentView)
-            let position = contentView.convert(event.locationInWindow, from: nil)
-            label.setFrameOrigin(NSPoint(x: position.x + 12, y: position.y + 8))
-        }
-        NSCursor.closedHand.set()
+        let cursor = convert(event.locationInWindow, from: nil)
+        item.setDraggingFrame(NSRect(x: cursor.x - 8, y: cursor.y - 12, width: size.width, height: size.height), contents: image)
+        let source = BranchDragSession(drag: drag, window: window)
+        beginDraggingSession(with: [item], event: event, source: source)
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard let start else { return }
-        defer { clearDrag() }
-        if preview != nil || moved(from: start, to: event.locationInWindow) {
-            if Self.reference(at: event)?.id == control.reference.id { return }
-            let badge = destination(at: event.locationInWindow)
-            let target = badge.map { RevisionPoint($0.control.reference) } ?? HistoryTableView.revision(at: event, in: control.repository)
-            guard let target, target.id != control.reference.id else { return }
-            _ = control.onDrop(BranchDrag(repository: control.repository, source: RevisionPoint(control.reference)), target)
-        } else if event.clickCount == 2 {
-            control.onCheckout(control.reference)
-        } else {
-            control.onSelect(control.reference)
-        }
+        guard start != nil else { return }
+        start = nil
+        if event.clickCount == 2 { control.onCheckout(control.reference) }
+        else { control.onSelect(control.reference) }
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard control.reference.kind == .local, BranchDrag.commit(from: sender, in: control.repository) != nil else { return [] }
+        let target = RevisionPoint(control.reference)
+        guard let drag = BranchDrag.local(from: sender, in: control.repository), drag.canDrop(on: target) else { return [] }
         layer?.borderColor = NSColor.controlAccentColor.cgColor
         layer?.borderWidth = 2
         return .copy
@@ -131,45 +147,39 @@ final class BranchMouseView: NSView {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         layer?.borderWidth = 0
-        guard control.reference.kind == .local, let drag = BranchDrag.commit(from: sender, in: control.repository) else { return false }
-        return control.onDrop(drag, RevisionPoint(control.reference))
+        let target = RevisionPoint(control.reference)
+        guard let drag = BranchDrag.local(from: sender, in: control.repository), drag.canDrop(on: target) else { return false }
+        return control.onDrop(drag, target)
+    }
+}
+
+/// Owns the picked reference after its transient badge disappears.
+@MainActor private final class BranchDragSession: NSObject, NSDraggingSource {
+    private static var active: BranchDragSession?
+    let drag: BranchDrag
+    weak var window: NSWindow?
+
+    init(drag: BranchDrag, window: NSWindow) {
+        self.drag = drag
+        self.window = window
+        super.init()
+        Self.active = self
     }
 
-    private func destination(at point: NSPoint) -> BranchMouseView? {
-        Self.surfaces.allObjects.first { view in
-            view.window === window && view.control.repository == control.repository
-                && view.control.reference.id != control.reference.id && !view.isHiddenOrHasHiddenAncestor
-                && view.visibleRect.contains(view.convert(point, from: nil))
-        }
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .withinApplication ? .copy : []
     }
 
-    private func moved(from start: NSPoint, to end: NSPoint) -> Bool {
-        hypot(end.x - start.x, end.y - start.y) >= 4
+    func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
+        HistoryTableView.updateDragPreview(in: window, repository: drag.repository, at: nil, leaving: drag.source.oid)
     }
 
-    private func makePreview(in parent: NSView) -> NSTextField {
-        let label = NSTextField(labelWithString: "  " + control.reference.name + "  ")
-        label.font = .systemFont(ofSize: 12, weight: .semibold)
-        label.backgroundColor = .selectedContentBackgroundColor
-        label.textColor = .white
-        label.drawsBackground = true
-        label.sizeToFit()
-        parent.addSubview(label)
-        preview = label
-        return label
+    func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint) {
+        HistoryTableView.updateDragPreview(in: window, repository: drag.repository, at: screenPoint)
     }
 
-    private func clearDrag() {
-        if preview != nil { NSCursor.arrow.set() }
-        preview?.removeFromSuperview()
-        preview = nil
-        highlightedTarget?.layer?.borderWidth = 0
-        highlightedTarget = nil
-        start = nil
-    }
-
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if newWindow == nil { clearDrag() }
-        super.viewWillMove(toWindow: newWindow)
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        HistoryTableView.updateDragPreview(in: window, repository: drag.repository, at: nil)
+        Self.active = nil
     }
 }

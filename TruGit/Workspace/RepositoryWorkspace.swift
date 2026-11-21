@@ -580,8 +580,7 @@ struct RepositoryWorkspace: View {
     }
 
     private func proposeDrop(_ drag: BranchDrag, onto target: RevisionPoint) -> Bool {
-        guard canMoveBranches, drag.repository == tab.id, drag.source.id != target.id,
-              drag.source.isLocal || target.isLocal else { return false }
+        guard canMoveBranches, drag.repository == tab.id, drag.canDrop(on: target) else { return false }
         if drag.commits.count > 1 {
             guard target.isLocal else { return false }
             let locals = snapshot.references.filter { $0.kind == .local }.map(RevisionPoint.init)
@@ -972,7 +971,7 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
                         }.frame(width: 8).offset(x: columns.refs - 4)
                     }
                 CommitTable(graph: graph, columns: columns, snapshot: snapshot, selection: $selection, jump: scrollRequest,
-                            deletionChoices: deletionChoices, requestDelete: requestDelete, openActions: openActions, openBatch: openBatch, createTag: createTag, canAct: canAct, onDrop: onDrop) { references in
+                            deletionChoices: deletionChoices, requestDelete: requestDelete, openActions: openActions, openBatch: openBatch, createTag: createTag, canAct: canAct, onDrop: onDrop, expandedBadges: expandedBadges) { references in
                     BranchBadges(references: references, badge: referenceBadge, actions: referenceMenu)
                 }
                 if graph.rows.count == loadedMaximum {
@@ -987,6 +986,34 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
             }
         }
         .background(WorkspaceColors.history)
+    }
+
+    private func expandedBadges(_ references: [RepositoryReference], width: CGFloat) -> AnyView {
+        let atHead = references.contains { $0.kind == .local && $0.name == snapshot.repository.branch }
+        let tint = atHead ? Color(red: 0.03, green: 0.55, blue: 0.66)
+                          : references.first.map { snapshot.colors.color(for: $0) } ?? WorkspaceColors.accent
+        return AnyView(LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(references) { ref in
+                let current = ref.kind == .local && ref.name == snapshot.repository.branch
+                let symbol = ref.kind == .local ? "laptopcomputer" : ref.kind.icon
+                HStack(spacing: 5) {
+                    if current { Image(systemName: "checkmark").fontWeight(.bold) }
+                    Text(verbatim: ref.name)
+                        .fixedSize(horizontal: GraphReferencePreview.nameWidth(ref.name) + 48 <= width, vertical: true)
+                        .layoutPriority(1)
+                    Image(systemName: symbol).accessibilityHidden(true)
+                }
+                .font(.system(size: 13, weight: current ? .semibold : .medium))
+                .foregroundStyle(.white.opacity(current ? 1 : 0.87))
+                .padding(.horizontal, 6).frame(maxWidth: .infinity, minHeight: GraphReferencePreview.rowHeight, alignment: .leading)
+                .background(GraphReferenceRowBackground(referenceID: ref.id, tint: tint.opacity(current ? 0.64 : 0.27)))
+                .contentShape(Rectangle())
+                .modifier(BranchDragControl(reference: ref, repository: snapshot.repository.root,
+                                            onSelect: { selection = .commit($0.commitID) }, onCheckout: onCheckout, onDrop: onDrop))
+                .contextMenu { referenceMenu(ref) }
+                .accessibilityLabel(ref.name + ", " + ref.kind.rawValue)
+            }
+        }.background(WorkspaceColors.history))
     }
 
     private func referenceBadge(_ reference: RepositoryReference) -> some View {
