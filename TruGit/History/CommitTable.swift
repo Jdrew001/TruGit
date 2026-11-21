@@ -52,6 +52,7 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
     let requestDelete: (BranchDeletion) -> Void
     let openActions: (RevisionPoint, RevisionOperation?) -> Void
     let openBatch: (CommitBatch) -> Void
+    let createTag: (RevisionPoint) -> Void
     let canAct: Bool
     let onDrop: (BranchDrag, RevisionPoint) -> Bool
     @ViewBuilder let badges: ([RepositoryReference]) -> Badges
@@ -270,6 +271,11 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
                     menu.addItem(item)
                 }
             } else {
+                let tag = NSMenuItem(title: "Create Tag Here…", action: #selector(createTag(_:)), keyEquivalent: "")
+                tag.target = self
+                tag.representedObject = revision
+                tag.isEnabled = parent.canAct
+                menu.addItem(tag)
                 addAction("Cherry-pick commit " + point.shortID + "…", point, .cherryPick, to: menu)
                 if let destination {
                     addAction("Revert this commit on “" + destination.name + "”…", revision, .revert, to: menu)
@@ -301,6 +307,11 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
                 menu.addItem(item)
             }
             return menu
+        }
+
+        @objc private func createTag(_ item: NSMenuItem) {
+            guard parent.canAct, let point = item.representedObject as? RevisionPoint else { return }
+            parent.createTag(point)
         }
 
         @objc private func reviewSelectedCommits(_ item: NSMenuItem) {

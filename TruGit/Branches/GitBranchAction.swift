@@ -54,6 +54,7 @@ enum GitIntegration: String, Sendable {
 
 enum GitBranchAction: Sendable {
     case fetch
+    case pushTag(RepositoryReference, remote: String)
     case revision(RevisionAction)
     case skipIntegration(GitIntegration)
     case pull(RepositoryReference), push(RepositoryReference), stash
@@ -70,6 +71,7 @@ enum GitBranchAction: Sendable {
 
     var failureTitle: String {
         switch self {
+        case .pushTag: "Couldn’t push tag"
         case .fetch: "Fetch failed"
         case .revision(let action): action.operation.rawValue + " stopped"
         case .skipIntegration: "Couldn’t skip commit"
@@ -93,6 +95,8 @@ enum GitBranchAction: Sendable {
     }
 
     var returnsToHistory: Bool {
+        if case .pushTag = self { return false }
+        if case .revision(let action) = self, action.operation == .tag { return false }
         if case .fetch = self { return false }
         if case .worktree = self { return false }
         if case .resolve = self { return false }
@@ -111,6 +115,9 @@ enum GitBranchAction: Sendable {
     func run(in root: URL) async throws {
         let arguments: [String]
         switch self {
+        case .pushTag(let tag, let remote):
+            try await RevisionAction.pushTag(tag.name, at: tag.commitID, to: remote, in: root)
+            return
         case .fetch: arguments = ["fetch", "--all"]
         case .revision(let action):
             try await action.run(in: root)

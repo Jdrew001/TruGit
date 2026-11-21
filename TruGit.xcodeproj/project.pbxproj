@@ -22,6 +22,7 @@
 		A00000000000000000000124 /* BranchDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000125 /* BranchDrag.swift */; };
 		000000000000000000000068 /* RevisionAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000058 /* RevisionAction.swift */; };
 		000000000000000000000069 /* RevisionActionsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000059 /* RevisionActionsSheet.swift */; };
+		B670D744A584411EB350831A /* CreateTagSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B670D744A584411EB350831B /* CreateTagSheet.swift */; };
 		00000000000000000000006A /* CommitBatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000005A /* CommitBatch.swift */; };
 		00000000000000000000006B /* CommitBatchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000005B /* CommitBatchPlan.swift */; };
 		A00000000000000000000126 /* GitConflict.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000127 /* GitConflict.swift */; };
@@ -67,6 +68,7 @@
 		A00000000000000000000125 /* BranchDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BranchDrag.swift; sourceTree = "<group>"; };
 		000000000000000000000058 /* RevisionAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevisionAction.swift; sourceTree = "<group>"; };
 		000000000000000000000059 /* RevisionActionsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevisionActionsSheet.swift; sourceTree = "<group>"; };
+		B670D744A584411EB350831B /* CreateTagSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateTagSheet.swift; sourceTree = "<group>"; };
 		00000000000000000000005A /* CommitBatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitBatch.swift; sourceTree = "<group>"; };
 		00000000000000000000005B /* CommitBatchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitBatchPlan.swift; sourceTree = "<group>"; };
 		A00000000000000000000127 /* GitConflict.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitConflict.swift; sourceTree = "<group>"; };
@@ -180,6 +182,7 @@
 				A00000000000000000000125 /* BranchDrag.swift */,
 				000000000000000000000058 /* RevisionAction.swift */,
 				000000000000000000000059 /* RevisionActionsSheet.swift */,
+				B670D744A584411EB350831B /* CreateTagSheet.swift */,
 				00000000000000000000005A /* CommitBatch.swift */,
 				00000000000000000000005B /* CommitBatchPlan.swift */,
 			);
@@ -317,6 +320,7 @@
 				A00000000000000000000124 /* BranchDrag.swift in Sources */,
 				000000000000000000000068 /* RevisionAction.swift in Sources */,
 				000000000000000000000069 /* RevisionActionsSheet.swift in Sources */,
+				B670D744A584411EB350831A /* CreateTagSheet.swift in Sources */,
 				00000000000000000000006A /* CommitBatch.swift in Sources */,
 				00000000000000000000006B /* CommitBatchPlan.swift in Sources */,
 				A00000000000000000000126 /* GitConflict.swift in Sources */,

@@ -134,6 +134,7 @@ struct RevisionAction {
     var name = ""
     var tagMessage = ""
     var remoteName = ""
+    var pushTagTo: String?
 
     func run(in root: URL) async throws {
         if let reviewedWorktree, reviewedWorktree.resolvingSymlinksInPath() != root.resolvingSymlinksInPath() {
@@ -165,11 +166,19 @@ struct RevisionAction {
                 args = ["branch", "-m", "--", source.name, name]
             case .createBranch: args = ["branch", "--", name, source.oid]
             case .tag:
-                let annotation = tagMessage.isEmpty ? [] : ["-a", "-m", tagMessage]
+                let message = tagMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+                let annotation = message.isEmpty ? [] : ["-a", "-m", message]
                 args = ["tag"] + annotation + ["--", name, source.oid]
             default: throw RepositoryReadError.invalidOutput
             }
             _ = try await GitRepository.git(args, in: root)
+            if operation == .tag, let remote = pushTagTo {
+                do {
+                    try await Self.pushTag(name, at: source.oid, to: remote, in: root)
+                } catch {
+                    throw RepositoryReadError.commandFailed("Created “" + name + "” locally. Pushing to “" + remote + "” failed. Retry from the tag’s sidebar menu.\n\n" + error.localizedDescription)
+                }
+            }
             return
         }
         if operation == .checkout {
@@ -216,6 +225,21 @@ struct RevisionAction {
         case .push, .forcePush, .publish, .checkout, .rename, .tag, .createBranch: return
         }
         _ = try await GitRepository.git(arguments, in: root)
+    }
+
+    static func pushTag(_ name: String, at commit: String, to remote: String, in root: URL) async throws {
+        let remotes = try await GitRepository.git(["remote"], in: root)
+        guard String(decoding: remotes, as: UTF8.self).split(separator: "\n").contains(Substring(remote)) else {
+            throw RepositoryReadError.commandFailed("The selected remote is no longer configured.")
+        }
+        let ref = "refs/tags/" + name
+        let object = try await GitRepository.git(["show-ref", "--verify", "--hash", ref], in: root)
+        let oid = String(decoding: object.dropLast(), as: UTF8.self)
+        let peeled = try await GitRepository.git(["rev-parse", "--verify", oid + "^{commit}"], in: root)
+        guard String(decoding: peeled.dropLast(), as: UTF8.self) == commit else {
+            throw RepositoryReadError.commandFailed("The tag moved. Refresh and review its commit before pushing.")
+        }
+        _ = try await GitRepository.git(["push", "--no-follow-tags", "--", remote, oid + ":" + ref], in: root)
     }
 
     private func switchTo(_ point: RevisionPoint, in root: URL) async throws {

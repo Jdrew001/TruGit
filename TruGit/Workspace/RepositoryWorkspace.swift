@@ -25,6 +25,7 @@ struct RepositoryWorkspace: View {
     @State private var searching = false
     @State private var pushBranch: RepositoryReference?
     @State private var collapsedSearchGroups: Set<RepositoryReference.Kind> = []
+    @State private var tagTarget: RevisionPoint?
     @State private var branchDraft: BranchDraft?
     @State private var newBranchName = ""
     @State private var revisionReview: RevisionReview?
@@ -95,6 +96,10 @@ struct RepositoryWorkspace: View {
         } message: { stash in
             Text("Remove \(stash.selector) “\(stash.subject)” from this repository’s stash list?")
         }
+        .sheet(item: $tagTarget) { point in
+            CreateTagSheet(point: point, tags: Set(snapshot.references.filter { $0.kind == .tag }.map(\.name)),
+                           remotes: snapshot.remotes) { performBranchAction(.revision($0)) }
+        }
         .sheet(item: $deleting) { choice in
             BranchDeletePrompt(choice: choice) { deletion, force in
                 performBranchAction(.deleteBranch(deletion, forceLocal: force))
@@ -145,6 +150,7 @@ struct RepositoryWorkspace: View {
                 barButton("Branch", "arrow.triangle.branch", "Create a branch at HEAD", enabled: canMoveBranches && current != nil) {
                     if let current { nameBranch(.create(current)) }
                 }
+                barButton("Tag", "tag", "Create a tag at the current commit", enabled: canTagHead, action: tagHead)
                 barButton("Stash", "tray.and.arrow.down", "Stash tracked and untracked changes", enabled: canMoveBranches && !snapshot.repository.changes.isEmpty && !hasConflicts) { performBranchAction(.stash) }
                 barButton("Pop", "tray.and.arrow.up", "Apply the latest stash", enabled: canMoveBranches && !snapshot.stashes.isEmpty && !hasConflicts) {
                     if let latest = snapshot.stashes.first { performBranchAction(.stashEntry(.pop, latest)) }
@@ -184,6 +190,13 @@ struct RepositoryWorkspace: View {
         ), titleVisibility: .visible, presenting: pushBranch) { branch in
             Button("Push") { performBranchAction(.push(branch)) }
         }
+    }
+
+    private var canTagHead: Bool { canMoveBranches && snapshot.repository.headID != nil }
+
+    private func tagHead() {
+        guard canTagHead, let head = snapshot.repository.headID else { return }
+        tagTarget = current.map(RevisionPoint.init) ?? RevisionPoint(commit: head)
     }
 
     private var canPush: Bool { canMoveBranches && current != nil }
@@ -258,7 +271,7 @@ struct RepositoryWorkspace: View {
     private var detail: some View {
         Group {
             HistoryView(snapshot: snapshot, pendingCommitBatch: tab.pendingCommitBatch, resumeBatchReview: resumeBatchReview, selection: $tab.historySelection,
-                        jump: $tab.commitJump, worktreeFileCommit: tab.worktreeFileCommit, onCheckout: checkout, onDrop: proposeDrop, openBatch: { commitBatch = $0 }, openActions: { source, preferred in showActions(source, preferred: preferred) }, canAct: canMoveBranches, referenceMenu: referenceActions, deletionChoices: deletionChoices, requestDelete: { deleting = $0 },
+                        jump: $tab.commitJump, worktreeFileCommit: tab.worktreeFileCommit, onCheckout: checkout, onDrop: proposeDrop, openBatch: { commitBatch = $0 }, openActions: { source, preferred in showActions(source, preferred: preferred) }, createTag: { tagTarget = $0 }, canAct: canMoveBranches, referenceMenu: referenceActions, deletionChoices: deletionChoices, requestDelete: { deleting = $0 },
                         showsDiff: tab.diff != nil, center: { if let diff = tab.diff { diffView(diff) } },
                         worktree: {
                             WorktreePanel(repository: snapshot.repository, branchColor: snapshot.colors.currentBranchColor,
@@ -317,7 +330,7 @@ struct RepositoryWorkspace: View {
                     navigationRow("Pull Requests", icon: "arrow.triangle.pull", selection: .pullRequests)
                     ForEach(RepositoryReference.Kind.allCases, id: \.self) { kind in
                         let references = matches.filter { $0.kind == kind }
-                        if !references.isEmpty {
+                        if !references.isEmpty || (kind == .tag && query.isEmpty) {
                             referenceGroup(kind, references: references, isFiltering: !query.isEmpty)
                         }
                     }
@@ -391,8 +404,9 @@ struct RepositoryWorkspace: View {
     }
 
     @ViewBuilder
-    private func sidebarGroup<Rows: View>(_ title: String, _ icon: String, count: Int,
-                                          expanded: Binding<Bool>, @ViewBuilder rows: () -> Rows) -> some View {
+    private func sidebarGroup<Rows: View, HeaderMenu: View>(_ title: String, _ icon: String, count: Int,
+                                          expanded: Binding<Bool>, @ViewBuilder headerMenu: () -> HeaderMenu = { EmptyView() },
+                                          @ViewBuilder rows: () -> Rows) -> some View {
         Button { expanded.wrappedValue.toggle() } label: {
             HStack(spacing: 6) {
                 Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right").frame(width: 10)
@@ -407,6 +421,7 @@ struct RepositoryWorkspace: View {
         .buttonStyle(.plain).padding(.top, 3)
         .accessibilityLabel(title + ", " + String(count))
         .accessibilityValue(expanded.wrappedValue ? "Expanded" : "Collapsed")
+        .contextMenu { headerMenu() }
         if expanded.wrappedValue { rows() }
     }
 
@@ -485,7 +500,11 @@ struct RepositoryWorkspace: View {
             }
         }
         return sidebarGroup(kind == .local ? "Local" : kind == .remote ? "Remote" : "Tags",
-                            kind.icon, count: references.count, expanded: isExpanded) {
+                            kind.icon, count: references.count, expanded: isExpanded, headerMenu: {
+            if kind == .tag {
+                Button("Create Tag…", systemImage: "tag", action: tagHead).disabled(!canTagHead)
+            }
+        }) {
             ForEach(references) { reference in referenceLabel(reference) }
         }
     }
@@ -644,6 +663,15 @@ struct RepositoryWorkspace: View {
             .disabled(!canMoveBranches)
         }
 
+        Button("Create Tag Here…", systemImage: "tag") { tagTarget = RevisionPoint(reference) }
+            .disabled(!canMoveBranches)
+        if reference.kind == .tag && !snapshot.remotes.isEmpty {
+            Menu("Push Tag to…") {
+                ForEach(snapshot.remotes, id: \.self) { remote in
+                    Button(remote) { performBranchAction(.pushTag(reference, remote: remote)) }
+                }
+            }.disabled(!canMoveBranches)
+        }
         Button("Create Branch from Here…", systemImage: "plus") {
             nameBranch(.create(reference))
         }
@@ -791,6 +819,7 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
     let onDrop: (BranchDrag, RevisionPoint) -> Bool
     let openBatch: (CommitBatch) -> Void
     let openActions: (RevisionPoint, RevisionOperation?) -> Void
+    let createTag: (RevisionPoint) -> Void
     let canAct: Bool
     let referenceMenu: (RepositoryReference) -> ReferenceMenu
     let deletionChoices: (RepositoryReference) -> [BranchDeletion]
@@ -943,7 +972,7 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
                         }.frame(width: 8).offset(x: columns.refs - 4)
                     }
                 CommitTable(graph: graph, columns: columns, snapshot: snapshot, selection: $selection, jump: scrollRequest,
-                            deletionChoices: deletionChoices, requestDelete: requestDelete, openActions: openActions, openBatch: openBatch, canAct: canAct, onDrop: onDrop) { references in
+                            deletionChoices: deletionChoices, requestDelete: requestDelete, openActions: openActions, openBatch: openBatch, createTag: createTag, canAct: canAct, onDrop: onDrop) { references in
                     BranchBadges(references: references, badge: referenceBadge, actions: referenceMenu)
                 }
                 if graph.rows.count == loadedMaximum {
