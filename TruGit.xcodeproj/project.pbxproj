@@ -1,0 +1,353 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* TruGitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* TruGitApp.swift */; };
+		A10000000000000000000010 /* GitRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* GitRepository.swift */; };
+		A00000000000000000000012 /* GitHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* GitHistory.swift */; };
+		A00000000000000000000014 /* CommitGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000015 /* CommitGraph.swift */; };
+		A00000000000000000000016 /* RepositoryWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000017 /* RepositoryWorkspace.swift */; };
+		A00000000000000000000018 /* GitDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000019 /* GitDiff.swift */; };
+		A0000000000000000000001A /* DiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001B /* DiffView.swift */; };
+		A0000000000000000000001C /* RepositoryTabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001D /* RepositoryTabs.swift */; };
+		A0000000000000000000013A /* RepositorySession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000013B /* RepositorySession.swift */; };
+		A0000000000000000000013C /* RepositoryTabDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000013D /* RepositoryTabDrag.swift */; };
+		A00000000000000000000120 /* CodeHighlighting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000121 /* CodeHighlighting.swift */; };
+		A00000000000000000000122 /* GitBranchAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000123 /* GitBranchAction.swift */; };
+		A00000000000000000000124 /* BranchDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000125 /* BranchDrag.swift */; };
+		000000000000000000000068 /* RevisionAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000058 /* RevisionAction.swift */; };
+		000000000000000000000069 /* RevisionActionsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000059 /* RevisionActionsSheet.swift */; };
+		00000000000000000000006A /* CommitBatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000005A /* CommitBatch.swift */; };
+		00000000000000000000006B /* CommitBatchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000005B /* CommitBatchPlan.swift */; };
+		A00000000000000000000126 /* GitConflict.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000127 /* GitConflict.swift */; };
+		A00000000000000000000128 /* ConflictDiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000129 /* ConflictDiffView.swift */; };
+		A00000000000000000000130 /* MergeEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000131 /* MergeEditor.swift */; };
+		A00000000000000000000132 /* CommitTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000133 /* CommitTable.swift */; };
+		A00000000000000000000134 /* RepositoryEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000135 /* RepositoryEvents.swift */; };
+		A00000000000000000000136 /* WorktreeAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000137 /* WorktreeAction.swift */; };
+		A00000000000000000000138 /* WorktreePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000139 /* WorktreePanel.swift */; };
+		A00000000000000000000140 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000141 /* Assets.xcassets */; };
+		000000000000000000000061 /* LaunchSplash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000051 /* LaunchSplash.swift */; };
+		000000000000000000000062 /* RepositoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000052 /* RepositoryModel.swift */; };
+		000000000000000000000063 /* RepositoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000053 /* RepositoryView.swift */; };
+		000000000000000000000065 /* CloneRepositorySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000055 /* CloneRepositorySheet.swift */; };
+		000000000000000000000066 /* GitErrorDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000056 /* GitErrorDetails.swift */; };
+		000000000000000000000067 /* WorkspaceScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000057 /* WorkspaceScrollView.swift */; };
+		000000000000000000000064 /* RepositoryClone.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000054 /* RepositoryClone.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A10000000000000000000002 /* TruGitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TruGitApp.swift; sourceTree = "<group>"; };
+		A10000000000000000000003 /* TruGit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TruGit.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000011 /* GitRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitRepository.swift; sourceTree = "<group>"; };
+		A00000000000000000000013 /* GitHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHistory.swift; sourceTree = "<group>"; };
+		A00000000000000000000015 /* CommitGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitGraph.swift; sourceTree = "<group>"; };
+		A00000000000000000000017 /* RepositoryWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryWorkspace.swift; sourceTree = "<group>"; };
+		A00000000000000000000019 /* GitDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiff.swift; sourceTree = "<group>"; };
+		A0000000000000000000001B /* DiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffView.swift; sourceTree = "<group>"; };
+		A0000000000000000000001D /* RepositoryTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryTabs.swift; sourceTree = "<group>"; };
+		A0000000000000000000013B /* RepositorySession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositorySession.swift; sourceTree = "<group>"; };
+		A0000000000000000000013D /* RepositoryTabDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryTabDrag.swift; sourceTree = "<group>"; };
+		A00000000000000000000121 /* CodeHighlighting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeHighlighting.swift; sourceTree = "<group>"; };
+		A00000000000000000000123 /* GitBranchAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitBranchAction.swift; sourceTree = "<group>"; };
+		A00000000000000000000125 /* BranchDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BranchDrag.swift; sourceTree = "<group>"; };
+		000000000000000000000058 /* RevisionAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevisionAction.swift; sourceTree = "<group>"; };
+		000000000000000000000059 /* RevisionActionsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevisionActionsSheet.swift; sourceTree = "<group>"; };
+		00000000000000000000005A /* CommitBatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitBatch.swift; sourceTree = "<group>"; };
+		00000000000000000000005B /* CommitBatchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitBatchPlan.swift; sourceTree = "<group>"; };
+		A00000000000000000000127 /* GitConflict.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitConflict.swift; sourceTree = "<group>"; };
+		A00000000000000000000129 /* ConflictDiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConflictDiffView.swift; sourceTree = "<group>"; };
+		A00000000000000000000131 /* MergeEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MergeEditor.swift; sourceTree = "<group>"; };
+		A00000000000000000000133 /* CommitTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitTable.swift; sourceTree = "<group>"; };
+		A00000000000000000000135 /* RepositoryEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryEvents.swift; sourceTree = "<group>"; };
+		A00000000000000000000137 /* WorktreeAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeAction.swift; sourceTree = "<group>"; };
+		A00000000000000000000139 /* WorktreePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreePanel.swift; sourceTree = "<group>"; };
+		A00000000000000000000141 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		000000000000000000000051 /* LaunchSplash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchSplash.swift; sourceTree = "<group>"; };
+		000000000000000000000052 /* RepositoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryModel.swift; sourceTree = "<group>"; };
+		000000000000000000000053 /* RepositoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryView.swift; sourceTree = "<group>"; };
+		000000000000000000000055 /* CloneRepositorySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloneRepositorySheet.swift; sourceTree = "<group>"; };
+		000000000000000000000056 /* GitErrorDetails.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitErrorDetails.swift; sourceTree = "<group>"; };
+		000000000000000000000057 /* WorkspaceScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceScrollView.swift; sourceTree = "<group>"; };
+		000000000000000000000054 /* RepositoryClone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryClone.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		A10000000000000000000004 = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000005 /* TruGit */,
+				A10000000000000000000006 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A10000000000000000000005 /* TruGit */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000071 /* App */,
+				000000000000000000000072 /* Workspace */,
+				000000000000000000000073 /* Tabs */,
+				000000000000000000000074 /* History */,
+				000000000000000000000075 /* Branches */,
+				000000000000000000000076 /* Changes */,
+				000000000000000000000077 /* Conflicts */,
+				A00000000000000000000141 /* Assets.xcassets */,
+			);
+			path = TruGit;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000006 /* Products */ = {
+			isa = PBXGroup;
+			children = (A10000000000000000000003 /* TruGit.app */);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		000000000000000000000071 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000002 /* TruGitApp.swift */,
+				000000000000000000000051 /* LaunchSplash.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		000000000000000000000072 /* Workspace */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000052 /* RepositoryModel.swift */,
+				000000000000000000000053 /* RepositoryView.swift */,
+				000000000000000000000055 /* CloneRepositorySheet.swift */,
+				000000000000000000000056 /* GitErrorDetails.swift */,
+				000000000000000000000057 /* WorkspaceScrollView.swift */,
+				000000000000000000000054 /* RepositoryClone.swift */,
+				A00000000000000000000017 /* RepositoryWorkspace.swift */,
+				A10000000000000000000011 /* GitRepository.swift */,
+				A00000000000000000000135 /* RepositoryEvents.swift */,
+			);
+			path = Workspace;
+			sourceTree = "<group>";
+		};
+		000000000000000000000073 /* Tabs */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000001D /* RepositoryTabs.swift */,
+				A0000000000000000000013B /* RepositorySession.swift */,
+				A0000000000000000000013D /* RepositoryTabDrag.swift */,
+			);
+			path = Tabs;
+			sourceTree = "<group>";
+		};
+		000000000000000000000074 /* History */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000013 /* GitHistory.swift */,
+				A00000000000000000000015 /* CommitGraph.swift */,
+				A00000000000000000000133 /* CommitTable.swift */,
+			);
+			path = History;
+			sourceTree = "<group>";
+		};
+		000000000000000000000075 /* Branches */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000123 /* GitBranchAction.swift */,
+				A00000000000000000000125 /* BranchDrag.swift */,
+				000000000000000000000058 /* RevisionAction.swift */,
+				000000000000000000000059 /* RevisionActionsSheet.swift */,
+				00000000000000000000005A /* CommitBatch.swift */,
+				00000000000000000000005B /* CommitBatchPlan.swift */,
+			);
+			path = Branches;
+			sourceTree = "<group>";
+		};
+		000000000000000000000076 /* Changes */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000139 /* WorktreePanel.swift */,
+				A00000000000000000000137 /* WorktreeAction.swift */,
+				A0000000000000000000001B /* DiffView.swift */,
+				A00000000000000000000019 /* GitDiff.swift */,
+				A00000000000000000000121 /* CodeHighlighting.swift */,
+			);
+			path = Changes;
+			sourceTree = "<group>";
+		};
+		000000000000000000000077 /* Conflicts */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000129 /* ConflictDiffView.swift */,
+				A00000000000000000000127 /* GitConflict.swift */,
+				A00000000000000000000131 /* MergeEditor.swift */,
+			);
+			path = Conflicts;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A10000000000000000000007 /* TruGit */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000009 /* Target build configurations */;
+			buildPhases = (A1000000000000000000000A /* Sources */, A00000000000000000000142 /* Resources */);
+			buildRules = ();
+			dependencies = ();
+			name = TruGit;
+			productName = TruGit;
+			productReference = A10000000000000000000003 /* TruGit.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A10000000000000000000008 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {BuildIndependentTargetsInParallel = 1; };
+			buildConfigurationList = A1000000000000000000000B /* Project build configurations */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = A10000000000000000000004;
+			productRefGroup = A10000000000000000000006 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A10000000000000000000007 /* TruGit */);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A00000000000000000000142 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A00000000000000000000140 /* Assets.xcassets in Resources */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A1000000000000000000000A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				000000000000000000000061 /* LaunchSplash.swift in Sources */,
+				000000000000000000000062 /* RepositoryModel.swift in Sources */,
+				000000000000000000000063 /* RepositoryView.swift in Sources */,
+				000000000000000000000065 /* CloneRepositorySheet.swift in Sources */,
+				000000000000000000000066 /* GitErrorDetails.swift in Sources */,
+				000000000000000000000067 /* WorkspaceScrollView.swift in Sources */,
+				000000000000000000000064 /* RepositoryClone.swift in Sources */,
+				A10000000000000000000001 /* TruGitApp.swift in Sources */,
+				A10000000000000000000010 /* GitRepository.swift in Sources */,
+				A00000000000000000000124 /* BranchDrag.swift in Sources */,
+				000000000000000000000068 /* RevisionAction.swift in Sources */,
+				000000000000000000000069 /* RevisionActionsSheet.swift in Sources */,
+				00000000000000000000006A /* CommitBatch.swift in Sources */,
+				00000000000000000000006B /* CommitBatchPlan.swift in Sources */,
+				A00000000000000000000126 /* GitConflict.swift in Sources */,
+				A00000000000000000000128 /* ConflictDiffView.swift in Sources */,
+				A00000000000000000000130 /* MergeEditor.swift in Sources */,
+				A00000000000000000000132 /* CommitTable.swift in Sources */,
+				A00000000000000000000134 /* RepositoryEvents.swift in Sources */,
+				A00000000000000000000136 /* WorktreeAction.swift in Sources */,
+				A00000000000000000000138 /* WorktreePanel.swift in Sources */,
+				A00000000000000000000122 /* GitBranchAction.swift in Sources */,
+				A00000000000000000000120 /* CodeHighlighting.swift in Sources */,
+				A0000000000000000000001C /* RepositoryTabs.swift in Sources */,
+				A0000000000000000000013A /* RepositorySession.swift in Sources */,
+				A0000000000000000000013C /* RepositoryTabDrag.swift in Sources */,
+				A0000000000000000000001A /* DiffView.swift in Sources */,
+				A00000000000000000000018 /* GitDiff.swift in Sources */,
+				A00000000000000000000016 /* RepositoryWorkspace.swift in Sources */,
+				A00000000000000000000014 /* CommitGraph.swift in Sources */,
+				A00000000000000000000012 /* GitHistory.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A1000000000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A1000000000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		A1000000000000000000000E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.drewatkison.TruGit;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A1000000000000000000000F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.drewatkison.TruGit;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A10000000000000000000009 /* Target build configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000000E /* Debug */,
+				A1000000000000000000000F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1000000000000000000000B /* Project build configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000000C /* Debug */,
+				A1000000000000000000000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A10000000000000000000008 /* Project object */;
+}
