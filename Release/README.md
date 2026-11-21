@@ -1,0 +1,63 @@
+# Distribute TruGit to another Mac
+
+TruGit uses Sparkle 2. The installed app checks the public GitHub Releases feed while running. The latest stable release must contain both `appcast.xml` and the ZIP referenced by that feed. The GitHub account connected inside TruGit is independent of updates.
+
+## Prepare the release Mac once
+
+Use a Developer ID Application certificate and configure an Apple notarization keychain profile (`xcrun notarytool store-credentials TruGit`). Resolve the package to get Sparkle’s release tools, then create a dedicated update signing key in the release Mac’s Keychain.
+
+```sh
+xcodebuild -resolvePackageDependencies -scheme TruGit -derivedDataPath .build
+sparkle=.build/SourcePackages/artifacts/sparkle/Sparkle/bin
+"$sparkle/generate_keys" --account TruGit
+```
+
+Keep a secure backup of the Sparkle private key on the release side. Use the same key and Apple team for subsequent releases. Only its public key goes into the app.
+
+## Prepare each release
+
+From the project root, choose a version tag and a build number greater than the previous release. Set `signer` to your Developer ID Application certificate name. The example creates a universal Release build in a dedicated directory.
+
+```sh
+version=0.2.0
+build=2
+signer='Developer ID Application: Your Company (TEAMID)'
+sparkle=.build/SourcePackages/artifacts/sparkle/Sparkle/bin
+public_key=$("$sparkle/generate_keys" --account TruGit -p)
+out=".build/releases/v$version"
+mkdir -p .build/releases
+mkdir "$out"
+xcodebuild -scheme TruGit -configuration Release -destination 'generic/platform=macOS' \
+  -derivedDataPath .build ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO \
+  CODE_SIGN_IDENTITY="$signer" ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS=--timestamp \
+  TRUGIT_UPDATE_PUBLIC_KEY="$public_key" MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$build" \
+  CONFIGURATION_BUILD_DIR="$PWD/$out/build" build
+app="$out/build/TruGit.app"
+codesign --verify --deep --strict "$app"
+test "$(/usr/libexec/PlistBuddy -c 'Print SUPublicEDKey' "$app/Contents/Info.plist")" = "$public_key"
+ditto -c -k --keepParent "$app" "$out/notarization.zip"
+xcrun notarytool submit "$out/notarization.zip" --keychain-profile TruGit --wait
+```
+
+After Apple reports **Accepted**, staple the ticket and generate the two distribution files.
+
+```sh
+xcrun stapler staple "$app"
+xcrun stapler validate "$app"
+spctl --assess --type execute --verbose "$app"
+mkdir "$out/assets"
+ditto -c -k --keepParent "$app" "$out/assets/TruGit-$version.zip"
+"$sparkle/generate_appcast" --account TruGit \
+  --download-url-prefix "https://github.com/Jdrew001/TruGit/releases/download/v$version/" \
+  "$out/assets"
+```
+
+Attach the versioned ZIP and `appcast.xml` from `assets` to the same draft GitHub Release tagged `v$version`, against the commit used to build it. Publish it as the latest stable release when both files are attached. The feed URL embedded in the app stays constant across releases. Each prepared feed lists the current universal macOS release.
+
+## On the work Mac
+
+Install the first approved distribution build in Applications and open it. Under **Settings → Updates**, automatic checks and installation are enabled by default. **Check for Updates** checks immediately. Sparkle can stage an update while the app is open and finish installation at quit. macOS may request permission to replace the app depending on its location and ownership.
+
+For a first rollout, install the earlier signed build on a second Mac, publish a higher build, check for updates, and verify the build number and restored tabs after relaunch.
+
+[Sparkle setup](https://sparkle-project.org/documentation/) · [Sparkle publishing](https://sparkle-project.org/documentation/publishing/) · [Apple Developer ID and notarization](https://developer.apple.com/developer-id/)

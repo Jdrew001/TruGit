@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-private enum CommitButtonAction: String, CaseIterable {
+enum CommitButtonAction: String, CaseIterable {
     case commit, push, commitAndPush
 
     func title(amending: Bool) -> String {
@@ -27,9 +27,9 @@ struct WorktreePanel: View {
     let openChange: (FileChange, DiffRequest.Source?) -> Void
     let perform: (WorktreeAction) -> Void
 
-    @AppStorage("commitButtonAction") private var selectedAction: CommitButtonAction = .commitAndPush
-    @AppStorage("workingChangesTree") private var tree = true
-    @AppStorage("workingChangesDescending") private var descending = false
+    @AppStorage(PreferenceKey.commitAction) private var selectedAction: CommitButtonAction = .commitAndPush
+    @AppStorage(PreferenceKey.workingTree) private var tree = true
+    @AppStorage(PreferenceKey.workingDescending) private var descending = false
     @State private var showingRemoteSetup = false
     @State private var remoteURL = ""
     @State private var chosenRemote: String?

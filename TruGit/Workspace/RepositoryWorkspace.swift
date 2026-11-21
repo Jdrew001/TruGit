@@ -24,8 +24,7 @@ struct RepositoryWorkspace: View {
     @State private var draggingSidebar: CGFloat?
     @State private var searching = false
     @State private var pushBranch: RepositoryReference?
-    @State private var worktreesExpanded = false
-    @State private var stashesExpanded = false
+    @State private var collapsedSearchGroups: Set<RepositoryReference.Kind> = []
     @State private var branchDraft: BranchDraft?
     @State private var newBranchName = ""
     @State private var revisionReview: RevisionReview?
@@ -37,23 +36,29 @@ struct RepositoryWorkspace: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            commandBar
-            if let integration = snapshot.repository.integration {
-                IntegrationBar(integration: integration, operation: snapshot.operationTitle, hasConflicts: hasConflicts,
-                               isBusy: !canChangeBranch, perform: performBranchAction)
-            }
-            GeometryReader { geo in
-                let limits = CGFloat(150)...max(150, geo.size.width - 490)
-                let width = min(limits.upperBound, max(limits.lowerBound, draggingSidebar ?? sidebarWidth))
-                HStack(spacing: 0) {
-                    if sidebarExpanded {
-                        sidebar.frame(width: width)
-                        WidthDivider(label: "Sidebar width", width: width, limits: limits) { value, finished in
-                            if finished { sidebarWidth = value; draggingSidebar = nil }
-                            else { draggingSidebar = value }
-                        }.frame(width: 8)
+            if tab.selection == .pullRequests {
+                PullRequestsView(root: tab.id, remotes: snapshot.remotes, branch: snapshot.repository.branch, showsInbox: sidebarExpanded) {
+                    tab.selection = .history
+                }
+            } else {
+                commandBar
+                if let integration = snapshot.repository.integration {
+                    IntegrationBar(integration: integration, operation: snapshot.operationTitle, hasConflicts: hasConflicts,
+                                   isBusy: !canChangeBranch, perform: performBranchAction)
+                }
+                GeometryReader { geo in
+                    let limits = CGFloat(150)...max(150, geo.size.width - 490)
+                    let width = min(limits.upperBound, max(limits.lowerBound, draggingSidebar ?? sidebarWidth))
+                    HStack(spacing: 0) {
+                        if sidebarExpanded {
+                            sidebar.frame(width: width)
+                            WidthDivider(label: "Sidebar width", width: width, limits: limits) { value, finished in
+                                if finished { sidebarWidth = value; draggingSidebar = nil }
+                                else { draggingSidebar = value }
+                            }.frame(width: 8)
+                        }
+                        detail.frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    detail.frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
@@ -65,6 +70,7 @@ struct RepositoryWorkspace: View {
                 tab.selection = .history
             }
         }
+        .onChange(of: tab.referenceFilter) { collapsedSearchGroups.removeAll() }
         .onChange(of: tab.historySelection) { tab.diff = nil }
         .onChange(of: tab.selection) {
             tab.diff = nil
@@ -308,13 +314,14 @@ struct RepositoryWorkspace: View {
             WorkspaceScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     navigationRow("All Commits", icon: "clock.arrow.circlepath", selection: .history)
+                    navigationRow("Pull Requests", icon: "arrow.triangle.pull", selection: .pullRequests)
                     ForEach(RepositoryReference.Kind.allCases, id: \.self) { kind in
                         let references = matches.filter { $0.kind == kind }
                         if !references.isEmpty {
                             referenceGroup(kind, references: references, isFiltering: !query.isEmpty)
                         }
                     }
-                    sidebarGroup("Worktrees", "externaldrive", count: snapshot.worktrees.count, expanded: $worktreesExpanded) {
+                    sidebarGroup("Worktrees", "externaldrive", count: snapshot.worktrees.count, expanded: sectionExpansion("worktrees")) {
                         ForEach(snapshot.worktrees) { item in
                             Button { openWorktree(item.id) } label: {
                                 Label(item.branch, systemImage: item.id.standardizedFileURL == tab.id.standardizedFileURL ? "house" : "externaldrive")
@@ -327,7 +334,7 @@ struct RepositoryWorkspace: View {
                             }
                         }
                     }
-                    sidebarGroup("Stashes", "tray", count: snapshot.stashes.count, expanded: $stashesExpanded) {
+                    sidebarGroup("Stashes", "tray", count: snapshot.stashes.count, expanded: sectionExpansion("stashes")) {
                         ForEach(snapshot.stashes, id: \.self) { stash in
                             let selected = tab.historySelection == .stash(stash.id)
                             Button {
@@ -406,7 +413,7 @@ struct RepositoryWorkspace: View {
     private func navigationRow(_ title: String, icon: String, selection: RepositorySelection) -> some View {
         let isStash: Bool = { if case .stash = tab.historySelection { return true }; return false }()
         return Button {
-            if isStash {
+            if isStash && selection == .history {
                 if let head = snapshot.repository.headID { tab.commitJump = CommitJump(commitID: head) }
                 else { tab.showWorkInProgress() }
             }
@@ -419,7 +426,7 @@ struct RepositoryWorkspace: View {
             }
             .padding(.horizontal, 8)
             .frame(height: 25)
-            .background(tab.selection == selection && !isStash ? WorkspaceColors.selection : .clear,
+            .background(tab.selection == selection && (!isStash || selection == .pullRequests) ? WorkspaceColors.selection : .clear,
                         in: RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
         }
@@ -460,15 +467,21 @@ struct RepositoryWorkspace: View {
         .padding(.vertical, 7)
     }
 
+    private func sectionExpansion(_ key: String, defaultExpanded: Bool = false) -> Binding<Bool> {
+        Binding(get: { tab.sidebarSections[key] ?? defaultExpanded },
+                set: { tab.sidebarSections[key] = $0 })
+    }
+
     private func referenceGroup(_ kind: RepositoryReference.Kind, references: [RepositoryReference],
                                 isFiltering: Bool) -> some View {
+        let saved = sectionExpansion(kind.prefix, defaultExpanded: true)
         let isExpanded = Binding {
-            isFiltering || !tab.collapsedGroups.contains(kind)
+            isFiltering ? !collapsedSearchGroups.contains(kind) : saved.wrappedValue
         } set: { expanded in
-            if expanded {
-                tab.collapsedGroups.remove(kind)
-            } else {
-                tab.collapsedGroups.insert(kind)
+            saved.wrappedValue = expanded
+            if isFiltering {
+                if expanded { collapsedSearchGroups.remove(kind) }
+                else { collapsedSearchGroups.insert(kind) }
             }
         }
         return sidebarGroup(kind == .local ? "Local" : kind == .remote ? "Remote" : "Tags",
@@ -996,8 +1009,8 @@ private struct CommitInspector: View {
     let references: [RepositoryReference]
     let viewDiff: (CommitFile) -> Void
 
-    @AppStorage("commitInspectorTree") private var tree = true
-    @AppStorage("commitInspectorDescending") private var descending = false
+    @AppStorage(PreferenceKey.historyTree) private var tree = true
+    @AppStorage(PreferenceKey.historyDescending) private var descending = false
     @State private var all = false
     @State private var files: [CommitFile] = []
     @State private var displayed: FileHierarchy<CommitFile>?

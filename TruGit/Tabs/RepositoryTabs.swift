@@ -7,6 +7,7 @@ struct CommitJump: Equatable {
 
 enum RepositorySelection: Hashable {
     case history
+    case pullRequests
     case reference(String)
 }
 
@@ -33,7 +34,10 @@ final class RepositoryTab: Identifiable {
     var switchUndo: SwitchStep?
     var switchRedo: SwitchStep?
     var referenceFilter = ""
-    var collapsedGroups: Set<RepositoryReference.Kind> = []
+    private let sidebarPreferencesKey: String
+    var sidebarSections: [String: Bool] {
+        didSet { UserDefaults.standard.set(sidebarSections, forKey: sidebarPreferencesKey) }
+    }
     var historySelection: HistorySelection?
     var worktreeFileCommit: String?
     var commitJump: CommitJump?
@@ -49,6 +53,9 @@ final class RepositoryTab: Identifiable {
         self.alias = alias
         self.id = snapshot.repository.root
         self.snapshot = snapshot
+        let key = "sidebarSections.v1." + snapshot.repository.root.standardizedFileURL.path
+        sidebarPreferencesKey = key
+        sidebarSections = UserDefaults.standard.dictionary(forKey: key) as? [String: Bool] ?? [:]
         if snapshot.repository.integration != nil { showWorkInProgress() }
     }
 
@@ -135,6 +142,10 @@ struct RepositoryTabs: View {
                     else { proxy.scrollTo(selected) }
                 }
             }
+            SettingsLink {
+                Image(systemName: "gearshape").frame(width: 32, height: 32).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).accessibilityLabel("Settings").help("Settings (⌘,)")
         }
         .padding(.horizontal, 6)
         .frame(height: 36)

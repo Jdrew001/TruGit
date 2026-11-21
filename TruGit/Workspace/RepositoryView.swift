@@ -2,13 +2,14 @@ import SwiftUI
 
 struct RepositoryView: View {
     @Bindable var model: RepositoryModel
-    @State private var sidebarExpanded = true
+    @AppStorage(PreferenceKey.launchAnimation) private var launchAnimation = true
+    @AppStorage("repositorySidebarExpanded") private var sidebarExpanded = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
-            if model.isLaunching {
+            if model.isLaunching && launchAnimation {
                 LaunchSplash().transition(.opacity)
             } else {
                 workspace.transition(.opacity)
@@ -16,9 +17,10 @@ struct RepositoryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(WorkspaceColors.history.ignoresSafeArea())
-        .animation(.easeInOut(duration: reduceMotion ? 0.15 : 0.35), value: model.isLaunching)
+        .animation(launchAnimation ? .easeInOut(duration: reduceMotion ? 0.15 : 0.35) : nil, value: model.isLaunching)
         .onAppear {
-            model.restoreSession(minimumDisplayTime: reduceMotion ? .milliseconds(800) : LaunchSplash.displayTime)
+            let duration = reduceMotion ? Duration.milliseconds(800) : LaunchSplash.displayTime
+            model.restoreSession(minimumDisplayTime: launchAnimation ? duration : .zero)
         }
         .task(id: model.activeID) { await model.observeActiveRepository() }
         .sheet(isPresented: $model.showingClone) { CloneRepositorySheet(model: model) }
@@ -59,7 +61,7 @@ struct RepositoryView: View {
                 }
                 .id(tab.id)
             }
-        } else if model.isLoading {
+        } else if model.isLoading || model.isLaunching {
             ProgressView("Reading repository…")
         } else {
             ContentUnavailableView {
@@ -70,6 +72,7 @@ struct RepositoryView: View {
                 Button("Add Repository…", action: model.openRepository)
                     .buttonStyle(.borderedProminent)
                 Button("Clone Repository…", action: model.showCloneSheet)
+                SettingsLink { Label("Settings", systemImage: "gearshape") }
             }
         }
     }

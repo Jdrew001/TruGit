@@ -2,17 +2,26 @@ import SwiftUI
 
 @main
 struct TruGitApp: App {
+    @StateObject private var updates = AppUpdates()
+    @State private var github = GitHubAccount()
     @State private var model = RepositoryModel()
 
     var body: some Scene {
         Window("TruGit", id: "main") {
             RepositoryView(model: model)
+                .environmentObject(updates)
+                .environment(github)
                 .frame(minWidth: 860, minHeight: 480)
                 .preferredColorScheme(.dark)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1340, height: 800)
         .commands {
+            CommandGroup(after: .appInfo) {
+                if updates.configured {
+                    Button("Check for Updates…", action: updates.check).disabled(!updates.canCheck)
+                }
+            }
             CommitCommands()
             CommandGroup(replacing: .newItem) {
                 Button("Add Repository…", action: model.openRepository)
@@ -30,6 +39,7 @@ struct TruGitApp: App {
                     .disabled(model.activeTab == nil || model.isLoading)
             }
         }
+        Settings { TruGitSettings().environment(github).environmentObject(updates) }
     }
 }
 
