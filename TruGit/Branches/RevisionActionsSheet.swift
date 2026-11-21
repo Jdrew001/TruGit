@@ -75,7 +75,9 @@ struct RevisionActionsSheet: View {
         let defaultChoice: RevisionOperation = review.source.id == review.initialTarget.id ? .createBranch :
             (review.source.isLocal && review.initialTarget.isRemote ? .push : .merge)
         let requested = review.preferred ?? defaultChoice
-        _operation = State(initialValue: options.contains(requested) ? requested : options.first ?? .createBranch)
+        let initialOperation = options.contains(requested) ? requested : options.first ?? .createBranch
+        _operation = State(initialValue: initialOperation)
+        _refName = State(initialValue: initialOperation == .publish || initialOperation == .rename ? review.source.name : "")
     }
 
     private var choices: [RevisionOperation] {

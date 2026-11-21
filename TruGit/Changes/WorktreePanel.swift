@@ -1,16 +1,38 @@
 import AppKit
 import SwiftUI
 
+private enum CommitButtonAction: String, CaseIterable {
+    case commit, push, commitAndPush
+
+    func title(amending: Bool) -> String {
+        switch self {
+        case .commit: amending ? "Amend Commit" : "Commit"
+        case .push: "Push"
+        case .commitAndPush: amending ? "Amend and Push" : "Commit and Push"
+        }
+    }
+}
+
 struct WorktreePanel: View {
     let repository: GitRepository
     let branchColor: Color
     @Binding var draft: CommitDraft
+    let upstreamID: String?
+    let remotes: [String]
+    let canCombine: Bool
     let busy: Bool
+    let canPush: Bool
+    let pushHelp: String
+    let push: () -> Void
     let openChange: (FileChange, DiffRequest.Source?) -> Void
     let perform: (WorktreeAction) -> Void
 
+    @AppStorage("commitButtonAction") private var selectedAction: CommitButtonAction = .commitAndPush
     @AppStorage("workingChangesTree") private var tree = true
     @AppStorage("workingChangesDescending") private var descending = false
+    @State private var showingRemoteSetup = false
+    @State private var remoteURL = ""
+    @State private var chosenRemote: String?
     @State private var discard: [FileChange]?
     @State private var previous: CommitMessage?
     @State private var previousID: String?
@@ -18,6 +40,114 @@ struct WorktreePanel: View {
 
     private var available: Bool {
         !busy && repository.integration == nil && !repository.changes.contains { $0.staged == .conflict }
+    }
+
+    private var canCommit: Bool {
+        guard available, !draft.active.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        if draft.amendment != nil { return draft.amendHead == repository.headID }
+        return repository.changes.contains { $0.staged != nil }
+    }
+
+    private var publishRemote: String? {
+        if let chosenRemote, remotes.contains(chosenRemote) { return chosenRemote }
+        return remotes.contains("origin") ? "origin" : remotes.first
+    }
+
+    private var destination: CommitPushDestination? {
+        guard canCombine else { return nil }
+        if let upstreamID { return CommitPushDestination(branch: repository.branch, route: .upstream(upstreamID)) }
+        guard let publishRemote else { return nil }
+        return CommitPushDestination(branch: repository.branch, route: .publish(remote: publishRemote))
+    }
+
+    private var combinedHelp: String {
+        if let upstreamID { return "Commit staged changes and push to " + upstreamID }
+        if let publishRemote { return "Commit staged changes and publish “" + repository.branch + "” to " + publishRemote }
+        return "Choose a remote repository to commit and push"
+    }
+
+    private var actionEnabled: Bool {
+        switch selectedAction {
+        case .commit: canCommit
+        case .push: canPush
+        case .commitAndPush: canCommit && canCombine
+        }
+    }
+
+    private func commit() {
+        guard canCommit else { return }
+        perform(.commit(draft, expectedHead: repository.headID))
+    }
+
+    private func runSelectedAction() {
+        guard actionEnabled else { return }
+        switch selectedAction {
+        case .commit: commit()
+        case .push: push()
+        case .commitAndPush:
+            if let destination {
+                perform(.commit(draft, expectedHead: repository.headID, push: destination))
+            } else {
+                remoteURL = ""
+                showingRemoteSetup = true
+            }
+        }
+    }
+
+    private var remoteSetup: some View {
+        let location = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Choose a push destination").font(.headline)
+            Text("This repository has no remote. TruGit will save this address as origin and push “" + repository.branch + "” there.")
+                .font(.callout).foregroundStyle(.secondary)
+            TextField("Repository URL or absolute path", text: $remoteURL)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel") { showingRemoteSetup = false }.keyboardShortcut(.cancelAction)
+                Button(selectedAction.title(amending: draft.amendment != nil)) {
+                    let target = CommitPushDestination(branch: repository.branch, route: .publish(remote: "origin", newURL: location))
+                    showingRemoteSetup = false
+                    perform(.commit(draft, expectedHead: repository.headID, push: target))
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!CommitPushDestination.validRemoteURL(location) || !canCommit || !canCombine)
+            }
+        }
+        .padding(20).frame(width: 420)
+    }
+
+    private var commitActionButton: some View {
+        let shortcut: (() -> Void)? = canCommit ? { commit() } : nil
+        let amending = draft.amendment != nil
+        let title = selectedAction.title(amending: amending)
+        return HStack(spacing: 0) {
+            Button(action: runSelectedAction) {
+                Text(title).fontWeight(.semibold)
+                    .frame(maxWidth: .infinity, minHeight: 26).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!actionEnabled)
+            .opacity(actionEnabled ? 1 : 0.55)
+            .help(selectedAction == .commitAndPush ? combinedHelp : selectedAction == .push ? pushHelp : "Save staged changes locally")
+            Rectangle().fill(.white.opacity(0.3)).frame(width: 1, height: 16)
+            Menu {
+                Picker("Default action", selection: $selectedAction) {
+                    ForEach(CommitButtonAction.allCases, id: \.self) { action in
+                        Text(action.title(amending: amending)).tag(action)
+                    }
+                }.pickerStyle(.inline)
+            } label: {
+                Image(systemName: "chevron.down").font(.caption.weight(.bold))
+                    .frame(width: 30, height: 26).contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("Choose commit action")
+            .help("Choose the default action")
+        }
+        .focusedSceneValue(\.commitStagedChanges, shortcut)
+        .foregroundStyle(.white)
+        .background(Color.teal.opacity(actionEnabled ? 0.85 : 0.45), in: RoundedRectangle(cornerRadius: 5))
     }
 
     var body: some View {
@@ -88,22 +218,21 @@ struct WorktreePanel: View {
                 TextField("Description", text: $draft.active.body, axis: .vertical)
                     .lineLimit(2...4).textFieldStyle(.plain)
                     .padding(7).background(WorkspaceColors.history, in: RoundedRectangle(cornerRadius: 4))
-                CommitOptions(signOff: $draft.signOff)
-                Button {
-                    perform(.commit(draft, expectedHead: repository.headID))
-                } label: {
-                    Text(draft.amendment != nil ? "Amend Commit" :
-                         staged.isEmpty ? "Stage Changes to Commit" : "Commit Staged Changes")
-                        .frame(maxWidth: .infinity)
+                if selectedAction == .commitAndPush, upstreamID == nil, canCombine, !remotes.isEmpty {
+                    Picker("Publish to", selection: Binding(get: { publishRemote }, set: { chosenRemote = $0 })) {
+                        ForEach(remotes, id: \.self) { Text($0).tag(Optional($0)) }
+                    }
                 }
-                .keyboardShortcut(.return, modifiers: .command)
-                .buttonStyle(.borderedProminent).tint(.teal)
-                .disabled(!available || draft.active.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                          (draft.amendment == nil ? staged.isEmpty : draft.amendHead != repository.headID))
+                if selectedAction == .commitAndPush, canCombine, upstreamID == nil, remotes.isEmpty {
+                    Text("Choose a push destination when you continue.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                commitActionButton
             }
             .disabled(busy)
             .font(.caption).padding(9)
         }
+        .sheet(isPresented: $showingRemoteSetup) { remoteSetup }
         .controlSize(.small)
         .background(WorkspaceColors.sidebar)
         .confirmationDialog("Discard unstaged changes?", isPresented: Binding(
@@ -140,15 +269,6 @@ struct WorktreePanel: View {
     }
 }
 
-private struct CommitOptions: View {
-    @Binding var signOff: Bool
-    @State private var expanded = false
-    var body: some View {
-        DisclosureGroup("Commit options", isExpanded: $expanded) {
-            Toggle("Add Signed-off-by trailer", isOn: $signOff).toggleStyle(.checkbox)
-        }
-    }
-}
 
 struct FileHierarchy<Item: Identifiable> {
     struct Row: Identifiable {

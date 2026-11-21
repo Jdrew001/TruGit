@@ -23,7 +23,7 @@ struct RepositoryWorkspace: View {
     @AppStorage("repositorySidebarWidth") private var sidebarWidth: Double = 224
     @State private var draggingSidebar: CGFloat?
     @State private var searching = false
-    @State private var confirmPush = false
+    @State private var pushBranch: RepositoryReference?
     @State private var worktreesExpanded = false
     @State private var stashesExpanded = false
     @State private var branchDraft: BranchDraft?
@@ -135,7 +135,7 @@ struct RepositoryWorkspace: View {
                     if let step = tab.switchRedo { performBranchAction(step.action) }
                 }
                 barButton("Pull", "arrow.down.to.line", "Fast-forward from the upstream branch", enabled: canMoveBranches && current?.upstreamID != nil) { if let current { performBranchAction(.pull(current)) } }
-                barButton("Push", "arrow.up.to.line", "Push the current branch to its upstream", enabled: canMoveBranches && current?.upstreamID != nil) { confirmPush = true }
+                barButton("Push", "arrow.up.to.line", pushHelp, enabled: canPush, action: requestPush)
                 barButton("Branch", "arrow.triangle.branch", "Create a branch at HEAD", enabled: canMoveBranches && current != nil) {
                     if let current { nameBranch(.create(current)) }
                 }
@@ -173,8 +173,28 @@ struct RepositoryWorkspace: View {
         }
         .padding(.horizontal, 12).frame(height: 46)
         .background(WorkspaceColors.panel)
-        .confirmationDialog("Push \(snapshot.repository.branch) to its upstream?", isPresented: $confirmPush,
-                            titleVisibility: .visible) { Button("Push") { if let current { performBranchAction(.push(current)) } } }
+        .confirmationDialog("Push “" + (pushBranch?.name ?? "") + "” to its upstream?", isPresented: Binding(
+            get: { pushBranch != nil }, set: { if !$0 { pushBranch = nil } }
+        ), titleVisibility: .visible, presenting: pushBranch) { branch in
+            Button("Push") { performBranchAction(.push(branch)) }
+        }
+    }
+
+    private var canPush: Bool { canMoveBranches && current != nil }
+
+    private var pushHelp: String {
+        if snapshot.repository.headID == nil { return "Create the first commit to push this branch" }
+        guard let current else { return "Check out a local branch to push" }
+        return current.upstreamID == nil ? "Publish this branch to a remote" : "Push local commits to the upstream branch"
+    }
+
+    private func requestPush() {
+        guard canPush, let current else { return }
+        if current.upstreamID == nil {
+            showActions(RevisionPoint(current), preferred: .publish)
+        } else {
+            pushBranch = current
+        }
     }
 
     private func valid(_ step: SwitchStep?) -> Bool {
@@ -236,8 +256,10 @@ struct RepositoryWorkspace: View {
                         showsDiff: tab.diff != nil, center: { if let diff = tab.diff { diffView(diff) } },
                         worktree: {
                             WorktreePanel(repository: snapshot.repository, branchColor: snapshot.colors.currentBranchColor,
-                                          draft: $tab.commitDraft,
-                                          busy: !canChangeBranch, openChange: openWorkingTreeDiff,
+                                          draft: $tab.commitDraft, upstreamID: current?.upstreamID, remotes: snapshot.remotes,
+                                          canCombine: canMoveBranches && (current != nil || snapshot.repository.headID == nil),
+                                          busy: !canChangeBranch, canPush: canPush, pushHelp: pushHelp, push: requestPush,
+                                          openChange: openWorkingTreeDiff,
                                           perform: { performBranchAction(.worktree($0)) })
                         }) { source, file in
                 let request = DiffRequest(root: tab.id, path: file.path,

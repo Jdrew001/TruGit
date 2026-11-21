@@ -9,7 +9,6 @@ struct CommitDraft: Sendable {
     var message = CommitMessage()
     var amendment: CommitMessage?
     var amendHead: String?
-    var signOff = false
 
     var active: CommitMessage {
         get { amendment ?? message }
@@ -20,11 +19,73 @@ struct CommitDraft: Sendable {
     }
 }
 
+struct CommitPushDestination: Sendable {
+    let branch: String
+    enum Route: Sendable {
+        case upstream(String)
+        case publish(remote: String, newURL: String? = nil)
+    }
+
+    let route: Route
+
+    static func validRemoteURL(_ value: String) -> Bool {
+        guard !value.isEmpty, !value.contains(where: { $0.isNewline }), !value.contains("\0") else { return false }
+        if value.hasPrefix("/") { return true }
+        if value.contains("://") {
+            guard let url = URLComponents(string: value), let scheme = url.scheme?.lowercased() else { return false }
+            return scheme == "file" ? url.path.hasPrefix("/") :
+                ["https", "http", "ssh", "git"].contains(scheme) && !(url.host ?? "").isEmpty
+        }
+        // Git also accepts SCP-style SSH addresses such as git@host:team/repo.git.
+        guard let colon = value.firstIndex(of: ":") else { return false }
+        let host = value[..<colon], path = value[value.index(after: colon)...]
+        return !host.isEmpty && !host.hasPrefix("-") && !host.contains("/") && !host.contains(where: \.isWhitespace)
+            && !path.isEmpty && !path.hasPrefix(":")
+    }
+
+    func configureRemoteIfNeeded(in root: URL) async throws {
+        guard case .publish(let remote, let url?) = route else { return }
+        guard Self.validRemoteURL(url) else { throw RepositoryReadError.commandFailed("Enter a valid Git remote URL or an absolute repository path.") }
+        _ = try await GitRepository.git(["remote", "add", "--", remote, url], in: root)
+    }
+
+    func pushCommittedChanges(in root: URL) async throws {
+        var action: GitBranchAction?
+        do {
+            let refs = try await GitHistory.references(in: root)
+            guard let ref = refs.first(where: { $0.kind == .local && $0.name == branch }) else {
+                throw RepositoryReadError.commandFailed("The local branch changed. Review the destination before pushing.")
+            }
+            let push: GitBranchAction
+            switch route {
+            case .upstream(let upstreamID) where upstreamID == ref.upstreamID:
+                push = .push(ref)
+            case .publish(let publishRemote, _) where ref.upstreamID == nil:
+                let point = RevisionPoint(ref)
+                push = .revision(RevisionAction(operation: .publish, source: point, target: point, mainline: nil,
+                                                name: branch, remoteName: publishRemote))
+            default:
+                throw RepositoryReadError.commandFailed("The upstream changed. Review the destination before pushing.")
+            }
+            action = push
+            try await push.run(in: root)
+        } catch {
+            throw CommitPushFailure(message: error.localizedDescription, push: action)
+        }
+    }
+}
+
+struct CommitPushFailure: LocalizedError {
+    let message: String
+    let push: GitBranchAction?
+    var errorDescription: String? { message }
+}
+
 enum WorktreeAction: Sendable {
     case stage([String]?)
     case unstage([String]?)
     case discardUnstaged([FileChange])
-    case commit(CommitDraft, expectedHead: String?)
+    case commit(CommitDraft, expectedHead: String?, push: CommitPushDestination? = nil)
 
     func run(in root: URL) async throws {
         let repo = try await GitRepository.read(at: root)
@@ -37,14 +98,18 @@ enum WorktreeAction: Sendable {
             args = ["--literal-pathspecs", "add", "-A", "--"] + (paths ?? ["."])
         case .unstage(let paths):
             args = ["--literal-pathspecs", "reset", "-q", "--"] + (paths ?? ["."])
-        case .commit(let draft, let head):
+        case .commit(let draft, let head, let destination):
+            guard destination == nil || destination?.branch == repo.branch else {
+                throw RepositoryReadError.commandFailed("The current branch changed. Review your staged changes again.")
+            }
             guard head == repo.headID, draft.amendment == nil || (head != nil && draft.amendHead == head) else {
                 throw RepositoryReadError.commandFailed("HEAD changed. Review the current commit before committing.")
             }
             let message = draft.active
             let summary = message.summary.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !summary.isEmpty else { throw RepositoryReadError.commandFailed("Enter a commit summary.") }
-            args = ["commit"] + (draft.amendment == nil ? [] : ["--amend"]) + (draft.signOff ? ["--signoff"] : [])
+            try await destination?.configureRemoteIfNeeded(in: root)
+            args = ["commit"] + (draft.amendment == nil ? [] : ["--amend"])
                 + ["-m", summary] + (message.body.isEmpty ? [] : ["-m", message.body])
         case .discardUnstaged(let reviewed):
             let current = Dictionary(uniqueKeysWithValues: repo.changes.map { ($0.id, $0) })
@@ -69,5 +134,6 @@ enum WorktreeAction: Sendable {
             return
         }
         _ = try await GitRepository.git(args, in: root)
+        if case .commit(_, _, let destination) = self { try await destination?.pushCommittedChanges(in: root) }
     }
 }

@@ -7,6 +7,7 @@ struct RepositorySnapshot: Identifiable, Sendable {
     let references: [RepositoryReference]
     let operationTitle: String?
     let worktrees: [GitWorktree]
+    let remotes: [String]
     let stashes: [GitStash]
     let colors: BranchColors
 
@@ -14,8 +15,9 @@ struct RepositorySnapshot: Identifiable, Sendable {
         GitWorktree.otherCheckout(of: branch, in: worktrees, outside: repository.root)
     }
 
-    init(repository: GitRepository, references: [RepositoryReference], operationTitle: String?, worktrees: [GitWorktree] = [], stashes: [GitStash] = []) {
+    init(repository: GitRepository, references: [RepositoryReference], operationTitle: String?, worktrees: [GitWorktree] = [], stashes: [GitStash] = [], remotes: [String] = []) {
         self.worktrees = worktrees
+        self.remotes = remotes
         self.stashes = stashes
         self.repository = repository
         self.references = references
@@ -38,18 +40,18 @@ final class RepositoryModel {
         let root: URL
         let branch: RepositoryReference
         let isPush: Bool
-        var reviewedPush: RevisionAction?
+        var exactPush: GitBranchAction?
 
-        init?(_ action: GitBranchAction, in root: URL) {
+        init?(_ action: GitBranchAction, in root: URL, pinPush: Bool = false) {
             self.root = root
             switch action {
-            case .revision(let request) where request.operation.pushes:
+            case .revision(let request) where request.operation.pushes || request.operation == .publish:
                 guard let ref = request.source.reference else { return nil }
                 branch = ref
                 isPush = true
-                reviewedPush = request
+                exactPush = action
             case .pull(let ref): branch = ref; isPush = false
-            case .push(let ref): branch = ref; isPush = true
+            case .push(let ref): branch = ref; isPush = true; exactPush = pinPush ? action : nil
             default: return nil
             }
         }
@@ -326,7 +328,7 @@ final class RepositoryModel {
             lastError = nil
             guard !Task.isCancelled, !isLoading, tab.snapshot.id == original.id else { continue }
             if latest.repository != original.repository || latest.references != original.references ||
-                latest.operationTitle != original.operationTitle || latest.worktrees != original.worktrees || latest.stashes != original.stashes {
+                latest.operationTitle != original.operationTitle || latest.worktrees != original.worktrees || latest.stashes != original.stashes || latest.remotes != original.remotes {
                 tab.snapshot = latest
             }
         }
@@ -340,7 +342,7 @@ final class RepositoryModel {
         let latest = tab.snapshot.references.first { $0.id == retry.branch.id && $0.upstreamID == retry.branch.upstreamID }
         let branch = latest ?? retry.branch
         selectTab(tab.id)
-        let action = retry.reviewedPush.map(GitBranchAction.revision) ?? (retry.isPush ? .push(branch) : .pull(branch))
+        let action = retry.exactPush ?? (retry.isPush ? .push(branch) : .pull(branch))
         performBranchAction(action, in: tab, retrying: id)
     }
 
@@ -370,7 +372,12 @@ final class RepositoryModel {
             }
             let before = tab.snapshot.repository
             let actionError = await runBranchAction(action, in: tab.id)
-            if actionError == nil, case .worktree(let work) = action {
+            let pushFailure = actionError as? CommitPushFailure
+            let failureTitle = pushFailure == nil ? action.failureTitle : "Committed locally · Push failed"
+            let retry = pushFailure?.push.flatMap { RemoteRetry($0, in: tab.id, pinPush: true) }
+                ?? (failureID != nil && failure?.id == failureID ? failure?.retry : nil)
+                ?? RemoteRetry(action, in: tab.id)
+            if actionError == nil || pushFailure != nil, case .worktree(let work) = action {
                 tab.diff = nil
                 if case .commit = work { tab.commitDraft = CommitDraft() }
             }
@@ -423,16 +430,16 @@ final class RepositoryModel {
                 }
             } catch {
                 if let actionError {
-                    failure = Failure(title: action.failureTitle, message: actionError.localizedDescription + "\n\nRefresh also failed.\n" + error.localizedDescription,
-                                      retry: RemoteRetry(action, in: tab.id))
+                    failure = Failure(title: failureTitle, message: actionError.localizedDescription + "\n\nRefresh also failed.\n" + error.localizedDescription,
+                                      retry: retry)
                 } else {
                     failure = Failure(title: "Couldn’t Refresh Repository", message: error.localizedDescription)
                 }
                 return
             }
             if let actionError {
-                failure = Failure(title: action.failureTitle, message: actionError.localizedDescription,
-                                  retry: RemoteRetry(action, in: tab.id))
+                failure = Failure(title: failureTitle, message: actionError.localizedDescription,
+                                  retry: retry)
             } else if let failureID, failure?.id == failureID {
                 failure = nil
             }
@@ -522,10 +529,12 @@ final class RepositoryModel {
             let subject = message?.components(separatedBy: .newlines).first ?? ""
             title = subject.hasPrefix("Merge ") && subject.contains(" into ") ? subject : "Merge into \(repository.branch)"
         }
+        async let remotes = GitRepository.git(["remote"], in: repository.root)
         async let worktrees = GitHistory.worktrees(in: repository.root)
         async let stashes = GitHistory.stashes(in: repository.root)
         return try await RepositorySnapshot(repository: repository, references: references, operationTitle: title,
-                                            worktrees: worktrees, stashes: stashes)
+                                            worktrees: worktrees, stashes: stashes,
+                                            remotes: String(decoding: remotes, as: UTF8.self).split(separator: "\n").map(String.init))
     }
 
 }

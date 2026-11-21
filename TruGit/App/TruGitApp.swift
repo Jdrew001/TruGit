@@ -13,6 +13,7 @@ struct TruGitApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1340, height: 800)
         .commands {
+            CommitCommands()
             CommandGroup(replacing: .newItem) {
                 Button("Add Repository…", action: model.openRepository)
                     .keyboardShortcut("o")
@@ -28,6 +29,29 @@ struct TruGitApp: App {
                     .keyboardShortcut("r")
                     .disabled(model.activeTab == nil || model.isLoading)
             }
+        }
+    }
+}
+
+private struct CommitShortcutKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+extension FocusedValues {
+    var commitStagedChanges: (() -> Void)? {
+        get { self[CommitShortcutKey.self] }
+        set { self[CommitShortcutKey.self] = newValue }
+    }
+}
+
+private struct CommitCommands: Commands {
+    @FocusedValue(\.commitStagedChanges) private var commit
+
+    var body: some Commands {
+        CommandGroup(after: .saveItem) {
+            Button("Commit Staged Changes") { commit?() }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(commit == nil)
         }
     }
 }

@@ -127,7 +127,7 @@ enum GitBranchAction: Sendable {
             guard fields.count == 3, !fields[0].isEmpty, fields[1].hasPrefix("refs/heads/"), branch.upstreamID == fields[2] else {
                 throw RepositoryReadError.commandFailed("The upstream branch changed. Refresh and try again.")
             }
-            if case .push = self { arguments = ["push", "--", fields[0], branch.id + ":" + fields[1]] }
+            if case .push = self { arguments = ["push", "--", fields[0], branch.commitID + ":" + fields[1]] }
             else { arguments = ["pull", "--ff-only", "--no-rebase", "--", fields[0], fields[1]] }
         case .deleteBranch(let deletion, let forceLocal):
             try await deletion.run(in: root, forceLocal: forceLocal)
