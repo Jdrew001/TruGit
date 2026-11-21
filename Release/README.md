@@ -11,7 +11,7 @@ git tag -a v0.2.2 -m "TruGit 0.2.2"
 git push origin v0.2.2
 ```
 
-On the signing Mac, a user LaunchAgent checks GitHub every three minutes and catches up after downtime. It creates a release branch at the tagged commit and queues the **TruGit** project through ShipStack’s local API. ShipStack uses its Node.js target to run the custom macOS pipeline on the Mac worker. Track the build in ShipStack → Builds. Keep the signing Mac logged in with ShipStack, Docker and its runner available.
+On the signing Mac, a user LaunchAgent checks GitHub every 15 seconds while the Mac is awake and catches up after downtime. It creates a release branch at the tagged commit and queues the **TruGit** project through ShipStack’s local API. ShipStack uses its Node.js target to run the custom macOS pipeline on the Mac worker. Track the build in ShipStack → Builds. Keep the signing Mac logged in with ShipStack, Docker and its runner available.
 
 The pipeline verifies that the tag matches the checkout, archives for Intel and Apple silicon, signs with Developer ID, submits to Apple, staples the ticket and verifies the app with Gatekeeper. It assigns the next Sparkle build number from the published feed and checks the GitHub digests of the DMG, ZIP and feed before publishing the release. Installed copies use the same signed feed as 0.2.0.
 

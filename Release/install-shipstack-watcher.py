@@ -18,7 +18,7 @@ agents = Path.home() / "Library/LaunchAgents"
 agents.mkdir(exist_ok=True)
 plist = agents / (label + ".plist")
 config = dict(Label=label, ProgramArguments=["/usr/bin/python3", str(watcher), project],
-              StartInterval=180, RunAtLoad=True,
+              StartInterval=15, RunAtLoad=True,
               EnvironmentVariables={"PATH":"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"},
               StandardOutPath=str(state / "tag-trigger.log"), StandardErrorPath=str(state / "tag-trigger-errors.log"))
 target = f"{domain}/{label}"
