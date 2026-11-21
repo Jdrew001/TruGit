@@ -18,6 +18,10 @@ final class AppUpdates: ObservableObject {
         let controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         self.controller = controller
         let updater = controller.updater
+        // Start the launch check before Sparkle schedules its regular update cycle.
+        if updater.automaticallyChecksForUpdates && updater.canCheckForUpdates && !updater.sessionInProgress {
+            updater.checkForUpdatesInBackground()
+        }
         updater.publisher(for: \.canCheckForUpdates).assign(to: &$canCheck)
         updater.publisher(for: \.automaticallyChecksForUpdates).assign(to: &$checksAutomatically)
         updater.publisher(for: \.automaticallyDownloadsUpdates).assign(to: &$installsAutomatically)
@@ -39,7 +43,7 @@ struct UpdateSettings: View {
                  " · Build " + (info?["CFBundleVersion"] as? String ?? "")).foregroundStyle(.secondary)
             if updates.configured {
                 VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Check for updates automatically", isOn: Binding(get: { updates.checksAutomatically }, set: updates.setChecks))
+                    Toggle("Check for updates at launch and periodically", isOn: Binding(get: { updates.checksAutomatically }, set: updates.setChecks))
                     Toggle("Download and install updates automatically", isOn: Binding(get: { updates.installsAutomatically }, set: updates.setInstalls))
                         .disabled(!updates.checksAutomatically)
                 }.toggleStyle(.checkbox).padding(14).pullCard()

@@ -197,7 +197,9 @@ private struct PullActivityCard: View {
                           systemImage: "chevron.left.forwardslash.chevron.right")
                         .font(.caption.monospaced()).foregroundStyle(PullStyle.blue).textSelection(.enabled)
                     if let hunk = entry.diffHunk, !hunk.isEmpty {
-                        DisclosureGroup("Code context", isExpanded: $expanded) { PatchText(text: hunk) }
+                        DisclosureGroup("Code context", isExpanded: $expanded) {
+                            if expanded { PatchText(text: hunk) }
+                        }
                             .font(.caption)
                     }
                 }
@@ -218,31 +220,6 @@ private struct PullActivityCard: View {
     }
 }
 
-private struct PatchText: View {
-    let text: String
-
-    private var highlighted: AttributedString {
-        var result = AttributedString()
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
-            var part = AttributedString((line.offset == 0 ? "" : "\n") + line.element)
-            switch line.element.first {
-            case "+": part.foregroundColor = .green
-            case "-": part.foregroundColor = .red
-            case "@": part.foregroundColor = WorkspaceColors.accent
-            default: break
-            }
-            result.append(part)
-        }
-        return result
-    }
-
-    var body: some View {
-        ScrollView(.horizontal) {
-            Text(highlighted).font(.system(.caption, design: .monospaced)).textSelection(.enabled).padding(7)
-        }.background(WorkspaceColors.panel, in: RoundedRectangle(cornerRadius: 4))
-    }
-}
-
 private struct FilePatch: View {
     let file: PullFile
     @State private var expanded: Bool
@@ -254,8 +231,10 @@ private struct FilePatch: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
-            if let patch = file.patch { PatchText(text: patch) }
-            else { Text("GitHub did not provide a text patch for this file.").font(.caption).foregroundStyle(.secondary) }
+            if expanded {
+                if let patch = file.patch { PatchText(text: patch) }
+                else { Text("GitHub did not provide a text patch for this file.").font(.caption).foregroundStyle(.secondary) }
+            }
         } label: {
             HStack {
                 Text(file.filename).lineLimit(2).truncationMode(.middle)
