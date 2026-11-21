@@ -2,6 +2,31 @@
 
 TruGit uses Sparkle 2. The installed app checks the public GitHub Releases feed while running. The latest stable release must contain both `appcast.xml` and the ZIP referenced by that feed. The GitHub account connected inside TruGit is independent of updates.
 
+## Publish a new version with ShipStack
+
+Push a stable version tag on the commit you want to ship. For example, after 0.2.1:
+
+```sh
+git tag -a v0.2.2 -m "TruGit 0.2.2"
+git push origin v0.2.2
+```
+
+On the signing Mac, a user LaunchAgent checks GitHub every three minutes and catches up after downtime. It creates a release branch at the tagged commit and queues the **TruGit** project through ShipStack’s local API. ShipStack uses its Node.js target to run the custom macOS pipeline on the Mac worker. Track the build in ShipStack → Builds. Keep the signing Mac logged in with ShipStack, Docker and its runner available.
+
+The pipeline verifies that the tag matches the checkout, archives for Intel and Apple silicon, signs with Developer ID, submits to Apple, staples the ticket and verifies the app with Gatekeeper. It assigns the next Sparkle build number from the published feed and checks both GitHub asset digests before publishing the release. Installed copies use the same signed feed as 0.2.0.
+
+A failed build stays in ShipStack. Retry it from the same `shipstack/releases/vX.Y.Z` branch. Publish a new tag for source changes. Unrelated tags, prereleases and versions older than the current stable release are skipped.
+
+### Install the tag trigger on a replacement signing Mac
+
+In ShipStack create a project for `Jdrew001/TruGit` using the Node.js custom pipeline target, semantic versioning, and branch-triggered automatic builds disabled. Authenticate the release user's GitHub CLI with repository write access. Restore the same Sparkle key in the `TruGit` Keychain account, the Apple Developer ID identity for the distribution team, and the `TruGit` notarytool profile. Then run:
+
+```sh
+/usr/bin/python3 Release/install-shipstack-watcher.py YOUR_SHIPSTACK_PROJECT_UUID
+```
+
+Run the tag trigger on one signing Mac. Its logs are in `~/Library/Application Support/TruGit/Release/tag-trigger*.log`. ShipStack retains the build and publish logs. To remove the trigger, unload `gui/$(id -u)/com.trugit.shipstack-release-tags` with launchctl and remove its plist from `~/Library/LaunchAgents`.
+
 ## Prepare the release Mac once
 
 Use a Developer ID Application certificate and configure an Apple notarization keychain profile (`xcrun notarytool store-credentials TruGit`). Resolve the package to get Sparkle’s release tools, then create a dedicated update signing key in the release Mac’s Keychain.

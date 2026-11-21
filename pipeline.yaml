@@ -1,0 +1,10 @@
+version: 1
+name: TruGit macOS distribution
+on:
+  push: false
+nodejs:
+  steps:
+    - id: publish_macos
+      name: Sign, notarize and publish TruGit
+      stage: deploy
+      run: /usr/bin/python3 Release/publish.py
