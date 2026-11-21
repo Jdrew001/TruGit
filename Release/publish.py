@@ -48,12 +48,15 @@ def latest():
     return output("gh", "api", f"repos/{REPO}/releases/latest", "--jq", ".tag_name")
 
 
-def build_app(tag, build, folder):
+def signing_identity():
     identities = output("security", "find-identity", "-v", "-p", "codesigning")
     matches = re.findall(r'([A-F0-9]{40}) "Developer ID Application: [^"]+ \(' + TEAM + r'\)"', identities)
     if len(matches) != 1:
         raise RuntimeError("Expected one valid Developer ID Application identity for " + TEAM)
-    signer = matches[0]
+    return matches[0]
+
+
+def build_app(tag, build, folder, signer):
     cache = STATE / "ShipStackBuildCache"
     tools = cache / "SourcePackages/artifacts/sparkle/Sparkle/bin"
     archive = folder / "TruGit.xcarchive"
@@ -82,20 +85,46 @@ def build_app(tag, build, folder):
     return app, tools
 
 
-def notarize(app, folder):
-    zip_path = folder / "notarize.zip"
-    run("ditto", "-c", "-k", "--keepParent", app, zip_path)
-    result = json.loads(output("xcrun", "notarytool", "submit", zip_path, "--keychain-profile", "TruGit",
+def submit_for_notarization(archive):
+    result = json.loads(output("xcrun", "notarytool", "submit", archive, "--keychain-profile", "TruGit",
                                "--wait", "--output-format", "json"))
     print("Apple notarization", result["id"], result["status"], flush=True)
     if result["status"] != "Accepted":
         raise RuntimeError("Apple did not accept this archive")
+
+
+def notarize(app, folder):
+    zip_path = folder / "notarize.zip"
+    run("ditto", "-c", "-k", "--keepParent", app, zip_path)
+    submit_for_notarization(zip_path)
     run("xcrun", "stapler", "staple", app)
     run("xcrun", "stapler", "validate", app)
     run("spctl", "--assess", "--type", "execute", "--verbose", app)
 
 
-def publish(tag, build, previous, app, tools, folder):
+def make_disk_image(app, tag, folder, signer):
+    stage = folder / "disk-image-contents"
+    stage.mkdir()
+    run("ditto", app, stage / "TruGit.app")
+    (stage / "Applications").symlink_to("/Applications")
+    image = folder / f"TruGit-{tag[1:]}.dmg"
+    run("hdiutil", "create", "-volname", "TruGit", "-fs", "HFS+", "-format", "UDZO",
+        "-srcfolder", stage, image)
+    run("codesign", "--sign", signer, "--timestamp", "--identifier", "com.drewatkison.TruGit.diskimage", image)
+    submit_for_notarization(image)
+    run("xcrun", "stapler", "staple", image)
+    run("xcrun", "stapler", "validate", image)
+    run("spctl", "--assess", "--type", "open", "--context", "context:primary-signature", "--verbose", image)
+    return image
+
+
+def install_notes(tag):
+    url = f"{BASE}/releases/download/{tag}/TruGit-{tag[1:]}.dmg"
+    return (f"[Download TruGit for macOS]({url})\n\n"
+            "Open the disk image, drag TruGit into Applications, then open TruGit from Applications.")
+
+
+def publish(tag, build, previous, app, tools, folder, image):
     import hashlib
     assets = folder / "assets"
     assets.mkdir()
@@ -113,12 +142,12 @@ def publish(tag, build, previous, app, tools, folder):
     drafts = json.loads(output("gh", "release", "list", "--repo", REPO, "--limit", "100", "--json", "tagName,isDraft"))
     if not any(r["tagName"] == tag and r["isDraft"] for r in drafts):
         run("gh", "release", "create", tag, "--repo", REPO, "--verify-tag", "--draft",
-            "--title", "TruGit " + tag[1:], "--generate-notes")
+            "--title", "TruGit " + tag[1:], "--notes", install_notes(tag), "--generate-notes")
     if output("gh","release","view",tag,"--repo",REPO,"--json","isDraft","--jq",".isDraft") != "true":
         raise RuntimeError("Expected a draft before uploading")
-    run("gh", "release", "upload", tag, zip_path, xml, "--repo", REPO, "--clobber")
+    run("gh", "release", "upload", tag, zip_path, xml, image, "--repo", REPO, "--clobber")
     uploaded = json.loads(output("gh", "release", "view", tag, "--repo", REPO, "--json", "assets"))["assets"]
-    for path in (xml, zip_path):
+    for path in (xml, zip_path, image):
         digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
         if not any(asset["name"] == path.name and asset["digest"] == digest for asset in uploaded):
             raise ValueError("Uploaded asset digest mismatch for " + path.name)
@@ -152,9 +181,11 @@ def main():
         print(f"Preparing {tag}, build {build}, from {output('git','rev-parse','HEAD')}", flush=True)
         with tempfile.TemporaryDirectory(prefix="TruGitDist-") as work:
             folder = Path(work)
-            app, tools = build_app(tag, build, folder)
+            signer = signing_identity()
+            app, tools = build_app(tag, build, folder, signer)
             notarize(app, folder)
-            publish(tag, build, previous, app, tools, folder)
+            image = make_disk_image(app, tag, folder, signer)
+            publish(tag, build, previous, app, tools, folder, image)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # Distribute TruGit to another Mac
 
-TruGit uses Sparkle 2. The installed app checks the public GitHub Releases feed while running. The latest stable release must contain both `appcast.xml` and the ZIP referenced by that feed. The GitHub account connected inside TruGit is independent of updates.
+TruGit uses Sparkle 2. The installed app checks the public GitHub Releases feed while running. The latest stable release must contain both `appcast.xml` and the ZIP referenced by that feed. For a Finder install, download the signed and notarized DMG from the release page, open it, and drag TruGit into Applications.
 
 ## Publish a new version with ShipStack
 
@@ -13,7 +13,7 @@ git push origin v0.2.2
 
 On the signing Mac, a user LaunchAgent checks GitHub every three minutes and catches up after downtime. It creates a release branch at the tagged commit and queues the **TruGit** project through ShipStack’s local API. ShipStack uses its Node.js target to run the custom macOS pipeline on the Mac worker. Track the build in ShipStack → Builds. Keep the signing Mac logged in with ShipStack, Docker and its runner available.
 
-The pipeline verifies that the tag matches the checkout, archives for Intel and Apple silicon, signs with Developer ID, submits to Apple, staples the ticket and verifies the app with Gatekeeper. It assigns the next Sparkle build number from the published feed and checks both GitHub asset digests before publishing the release. Installed copies use the same signed feed as 0.2.0.
+The pipeline verifies that the tag matches the checkout, archives for Intel and Apple silicon, signs with Developer ID, submits to Apple, staples the ticket and verifies the app with Gatekeeper. It assigns the next Sparkle build number from the published feed and checks the GitHub digests of the DMG, ZIP and feed before publishing the release. Installed copies use the same signed feed as 0.2.0.
 
 A failed build stays in ShipStack. Retry it from the same `shipstack/releases/vX.Y.Z` branch. Publish a new tag for source changes. Unrelated tags, prereleases and versions older than the current stable release are skipped.
 
