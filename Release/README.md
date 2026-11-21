@@ -16,12 +16,13 @@ Keep a secure backup of the Sparkle private key on the release side. Use the sam
 
 ## Prepare each release
 
-From the project root, choose a version tag and a build number greater than the previous release. Set `signer` to your Developer ID Application certificate name. The example creates a universal Release build in a dedicated directory.
+From the project root, choose a version tag and a build number greater than the previous release. Set `signer` to your Developer ID Application certificate fingerprint and `team` to its Apple Developer Team ID. The example creates a universal Release build in a dedicated directory.
 
 ```sh
 version=0.2.0
 build=2
-signer='Developer ID Application: Your Company (TEAMID)'
+signer='YOUR_DEVELOPER_ID_APPLICATION_CERTIFICATE_SHA1'
+team='YOUR_TEAM_ID'
 sparkle=.build/SourcePackages/artifacts/sparkle/Sparkle/bin
 public_key=$("$sparkle/generate_keys" --account TruGit -p)
 out=".build/releases/v$version"
@@ -29,10 +30,17 @@ mkdir -p .build/releases
 mkdir "$out"
 xcodebuild -scheme TruGit -configuration Release -destination 'generic/platform=macOS' \
   -derivedDataPath .build ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO \
-  CODE_SIGN_IDENTITY="$signer" ENABLE_HARDENED_RUNTIME=YES OTHER_CODE_SIGN_FLAGS=--timestamp \
+  CODE_SIGN_IDENTITY="$signer" DEVELOPMENT_TEAM="$team" ENABLE_HARDENED_RUNTIME=YES CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
   TRUGIT_UPDATE_PUBLIC_KEY="$public_key" MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$build" \
-  CONFIGURATION_BUILD_DIR="$PWD/$out/build" build
-app="$out/build/TruGit.app"
+  -archivePath "$out/TruGit.xcarchive" archive
+plutil -create xml1 "$out/export.plist"
+plutil -insert method -string developer-id "$out/export.plist"
+plutil -insert signingStyle -string manual "$out/export.plist"
+plutil -insert signingCertificate -string "$signer" "$out/export.plist"
+plutil -insert teamID -string "$team" "$out/export.plist"
+xcodebuild -exportArchive -archivePath "$out/TruGit.xcarchive" \
+  -exportOptionsPlist "$out/export.plist" -exportPath "$out/distribution"
+app="$out/distribution/TruGit.app"
 codesign --verify --deep --strict "$app"
 test "$(/usr/libexec/PlistBuddy -c 'Print SUPublicEDKey' "$app/Contents/Info.plist")" = "$public_key"
 ditto -c -k --keepParent "$app" "$out/notarization.zip"
