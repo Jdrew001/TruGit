@@ -7,12 +7,12 @@ private final class GraphReferenceHover: ObservableObject {
 }
 
 struct GraphReferenceRowBackground: View {
-    let referenceID: String
+    let badge: GraphReferenceBadge
     let tint: Color
     @EnvironmentObject private var hover: GraphReferenceHover
 
     var body: some View {
-        tint.overlay(Color.black.opacity(hover.referenceID == referenceID ? 0.20 : 0))
+        tint.overlay(Color.black.opacity(badge.references.contains { $0.id == hover.referenceID } ? 0.20 : 0))
     }
 }
 
@@ -48,20 +48,24 @@ final class GraphReferencePreview {
         ceil((name as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)]).width)
     }
 
-    func hover(_ refs: [RepositoryReference], anchor: NSRect, in table: NSTableView, content: @escaping (CGFloat) -> AnyView) {
-        guard let id = refs.first?.commitID, id != commit else { return }
+    func hover(_ badges: [GraphReferenceBadge], at id: String, anchor: NSRect, in table: NSTableView, content: @escaping (CGFloat) -> AnyView) {
+        guard id != commit else { return }
         dismiss()
         guard table.window?.isKeyWindow == true, let clip = table.enclosingScrollView?.contentView,
               table.visibleRect.intersects(anchor) else { return }
         commit = id
-        let longest = refs.reduce(CGFloat.zero) { max($0, Self.nameWidth($1.name)) }
-        let available = table.convert(table.visibleRect, to: nil)
-        let rect = table.convert(anchor, to: nil)
-        let width = min(available.width, min(560, max(82, ceil(longest) + 52)))
+        let longest = badges.map { badge in
+            // Reserve space for the location icon and the local branch’s switch button.
+            Self.nameWidth(badge.name) + (badge.reference.kind == .local ? 92 : 40) + (badge.reference.kind == .local && !badge.remotes.isEmpty ? 19 : 0)
+        }.max() ?? 0
+        // Measure the overlay and its text in the same coordinates as the table.
+        let available = table.convert(table.visibleRect, to: clip)
+        let rect = table.convert(anchor, to: clip)
+        let width = min(available.width, min(560, longest))
         let maxHeight = min(312, available.height)
         let rows = content(width).environmentObject(hoverState).frame(width: width)
-        let minimumHeight = CGFloat(refs.count) * Self.rowHeight
-        let needsMeasurement = minimumHeight <= maxHeight && longest + 52 > width
+        let minimumHeight = CGFloat(badges.count) * Self.rowHeight
+        let needsMeasurement = minimumHeight <= maxHeight && longest > width
         let naturalHeight = needsMeasurement
             ? NSHostingView(rootView: rows.fixedSize(horizontal: false, vertical: true)).fittingSize.height
             : minimumHeight
@@ -74,8 +78,8 @@ final class GraphReferencePreview {
         view.sizingOptions = []
         view.identifier = .init("expandedGraphReferences")
         let x = min(rect.minX, available.maxX - width)
-        let y = max(available.minY, rect.maxY - height)
-        view.frame = clip.convert(NSRect(x: x, y: y, width: width, height: height), from: nil)
+        let y = clip.isFlipped ? min(rect.minY, available.maxY - height) : max(available.minY, rect.maxY - height)
+        view.frame = NSRect(x: x, y: y, width: width, height: height)
         clip.addSubview(view, positioned: .above, relativeTo: table)
         overlay = view
         view.layoutSubtreeIfNeeded()

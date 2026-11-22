@@ -34,6 +34,18 @@ struct GitHubRepository: Hashable, Identifiable, Sendable {
         }
         return result
     }
+
+    static func fetchRemoteNames(in root: URL) async -> Set<String> {
+        guard let listing = try? await GitRepository.git(["remote", "-v"], in: root) else { return [] }
+        let lines = String(decoding: listing, as: UTF8.self).split(separator: "\n")
+        return Set(lines.compactMap { line in
+            let fields = line.split(separator: "\t", maxSplits: 1)
+            guard fields.count == 2 else { return nil }
+            let details = fields[1].split(separator: " ", maxSplits: 2)
+            guard details.count >= 2, details[1] == "(fetch)", Self(remoteURL: String(details[0])) != nil else { return nil }
+            return String(fields[0])
+        })
+    }
 }
 
 struct GitHubUser: Decodable, Sendable { let login: String }

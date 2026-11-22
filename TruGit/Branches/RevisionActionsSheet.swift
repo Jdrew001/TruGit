@@ -36,6 +36,54 @@ struct WorktreeLocation: View {
     }
 }
 
+struct PublishBranchSheet: View {
+    let branch: RepositoryReference
+    let remotes: [String]
+    let publish: (String, String?) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var chosenRemote: String
+    @State private var url = ""
+
+    init(branch: RepositoryReference, remotes: [String], publish: @escaping (String, String?) -> Void) {
+        self.branch = branch
+        self.remotes = remotes
+        self.publish = publish
+        let trackingRemote = branch.upstreamTarget?.remote
+        _chosenRemote = State(initialValue: trackingRemote.flatMap { remotes.contains($0) ? $0 : nil }
+                              ?? (remotes.contains("origin") ? "origin" : remotes.first ?? "origin"))
+    }
+
+    var body: some View {
+        let address = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Publish “" + branch.name + "”").font(.title3.bold())
+            if remotes.isEmpty {
+                Text("Enter the remote repository address. TruGit will save it as origin.")
+                TextField("Repository URL or absolute path", text: $url).textFieldStyle(.roundedBorder)
+            } else {
+                Picker("Remote", selection: $chosenRemote) {
+                    ForEach(remotes, id: \.self) { Text($0).tag($0) }
+                }.accessibilityLabel("Remote")
+            }
+            if let upstream = branch.upstreamTarget {
+                Text("Currently tracks " + upstream.displayName + ".").font(.callout)
+            }
+            Text("Future pushes will use " + chosenRemote + "/" + branch.name + ".")
+                .font(.callout).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Publish Branch") {
+                    publish(chosenRemote, remotes.isEmpty ? address : nil)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(remotes.isEmpty ? !CommitPushDestination.validRemoteURL(address) : !remotes.contains(chosenRemote))
+            }
+        }.padding(20).frame(width: 420)
+    }
+}
+
 struct RevisionActionsSheet: View {
     let review: RevisionReview
     let root: URL
@@ -99,19 +147,19 @@ struct RevisionActionsSheet: View {
                 }.fixedSize()
             }
             HStack(spacing: 8) {
-                endpoint(review.source, caption: review.changesDraggedBranch(for: operation) ? "Branch" : "Source")
+                endpoint(review.source, caption: operation == .merge ? "Merge from" : review.changesDraggedBranch(for: operation) ? "Branch" : "Source")
                 if !operation.namesRef && operation != .checkout {
                     Image(systemName: "arrow.right").foregroundStyle(.secondary)
                     Button { filter = ""; choosingTarget = true } label: {
                         HStack {
-                            endpoint(target, caption: review.changesDraggedBranch(for: operation) ? "Commit" : "Target")
+                            endpoint(target, caption: operation == .merge ? "Into branch" : review.changesDraggedBranch(for: operation) ? "Commit" : "Target")
                             Image(systemName: "chevron.up.chevron.down").font(.caption2)
                         }
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Choose target, " + target.name)
-                    .popover(isPresented: $choosingTarget) { targetBrowser }
+                    .popover(isPresented: $choosingTarget) { targetBrowser.zoomAppDialog() }
                 }
             }
             .padding(10).background(WorkspaceColors.history, in: RoundedRectangle(cornerRadius: 6))
@@ -140,8 +188,9 @@ struct RevisionActionsSheet: View {
             }
             if let owner = destinationWorktree {
                 WorktreeLocation(owner: owner)
-            } else if operation.isResetOrRevert && points.branch.name != current {
-                Text("TruGit will switch this worktree to “" + points.branch.name + "” first.")
+            } else if operation != .checkout,
+                      let checkout = operation.checkoutBranch(source: points.revision, target: points.branch), checkout.name != current {
+                Text("TruGit will switch this worktree to “" + checkout.name + "” first.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             if operation.usesMainline, let parents, parents.count > 1 {

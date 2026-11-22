@@ -5,11 +5,45 @@ struct RepositorySnapshot: Identifiable, Sendable {
     let id = UUID()
     let repository: GitRepository
     let references: [RepositoryReference]
+    let referenceBadges: [GraphReferenceBadge]
     let operationTitle: String?
     let worktrees: [GitWorktree]
     let remotes: [String]
     let stashes: [GitStash]
     let colors: BranchColors
+
+    func isCheckedOut(_ reference: RepositoryReference) -> Bool {
+        reference.kind == .local && reference.name == repository.branch
+    }
+
+    var checkedOutBranch: RepositoryReference? { references.first(where: isCheckedOut) }
+
+    func checkoutBranch(for ref: RepositoryReference) -> RepositoryReference? {
+        if ref.kind == .local { return ref }
+        guard ref.kind == .remote else { return nil }
+        let tracking = references.filter { $0.kind == .local && $0.upstreamID == ref.id }
+        let name = ref.remoteTarget?.name
+        return tracking.first { $0.name == name } ?? tracking.first(where: isCheckedOut) ?? tracking.first
+            ?? references.first { $0.kind == .local && $0.name == name && $0.upstreamID == nil }
+    }
+
+    func checkoutTitle(for branch: RepositoryReference) -> String {
+        if otherWorktree(for: branch.name) != nil { return "Open “" + branch.name + "” worktree" }
+        return "Switch to " + branch.name
+    }
+
+    func remoteBranch(for local: RepositoryReference) -> RepositoryReference? {
+        guard local.kind == .local else { return nil }
+        if let upstream = local.upstreamID { return references.first { $0.id == upstream && $0.kind == .remote } }
+        let matches = references.filter { $0.kind == .remote && $0.remoteTarget?.name == local.name }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    func canMergeBranches(from source: RepositoryReference? = nil) -> Bool {
+        guard let destination = references.first(where: { $0.kind == .local && $0.id != source?.id }) else { return false }
+        if let source { return source.kind != .tag }
+        return references.contains { $0.kind != .tag && $0.id != destination.id }
+    }
 
     func otherWorktree(for branch: String) -> GitWorktree? {
         GitWorktree.otherCheckout(of: branch, in: worktrees, outside: repository.root)
@@ -21,6 +55,7 @@ struct RepositorySnapshot: Identifiable, Sendable {
         self.stashes = stashes
         self.repository = repository
         self.references = references
+        referenceBadges = GraphReferenceBadge.grouped(references, currentBranch: repository.branch, remoteNames: remotes)
         self.operationTitle = operationTitle
         colors = BranchColors(references: references, currentBranch: repository.branch)
     }
@@ -50,6 +85,7 @@ final class RepositoryModel {
                 branch = ref
                 isPush = true
                 exactPush = action
+            case .publish(let ref, _, _): branch = ref; isPush = true; exactPush = action
             case .pull(let ref): branch = ref; isPush = false
             case .push(let ref): branch = ref; isPush = true; exactPush = pinPush ? action : nil
             default: return nil
@@ -361,8 +397,18 @@ final class RepositoryModel {
                 if let owner = try await destinationWorktree(for: action, from: sourceTab) {
                     tab = self.tab(for: owner)
                     selectTab(tab.id)
-                    if case .switchTo = action { return }
-                    if case .revision(let request) = action, request.operation == .checkout { return }
+                    let checkoutOnly: Bool
+                    switch action {
+                    case .switchTo: checkoutOnly = true
+                    case .revision(let request): checkoutOnly = request.operation == .checkout
+                    default: checkoutOnly = false
+                    }
+                    if checkoutOnly {
+                        if owner.repository.integration == nil, tab.pendingCommitBatch == nil, let branch = owner.checkedOutBranch {
+                            tab.selectReference(branch)
+                        }
+                        return
+                    }
                 } else {
                     tab = sourceTab
                 }
@@ -371,7 +417,10 @@ final class RepositoryModel {
                 return
             }
             let before = tab.snapshot.repository
+            let destination = action.pushDestination
+            if let destination { tab.pushStatus = .pushing(destination) }
             let actionError = await runBranchAction(action, in: tab.id)
+            if let destination { tab.pushStatus = actionError == nil ? .completed(destination) : nil }
             let pushFailure = actionError as? CommitPushFailure
             let failureTitle = pushFailure == nil ? action.failureTitle : "Committed locally · Push failed"
             let retry = pushFailure?.push.flatMap { RemoteRetry($0, in: tab.id, pinPush: true) }

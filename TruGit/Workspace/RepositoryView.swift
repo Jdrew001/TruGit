@@ -23,11 +23,12 @@ struct RepositoryView: View {
             model.restoreSession(minimumDisplayTime: launchAnimation ? duration : .zero)
         }
         .task(id: model.activeID) { await model.observeActiveRepository() }
-        .sheet(isPresented: $model.showingClone) { CloneRepositorySheet(model: model) }
+        .sheet(isPresented: $model.showingClone) { CloneRepositorySheet(model: model).zoomAppDialog() }
         .sheet(item: $model.initialization) { review in
             InitializationSheet(review: review, cancel: { model.initialization = nil }) { selected in
                 model.initializeRepositories(review, selected: selected)
             }
+            .zoomAppDialog()
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let failure = model.failure, !model.isLaunching {
@@ -73,6 +74,7 @@ struct RepositoryView: View {
                     .buttonStyle(.borderedProminent)
                 Button("Clone Repository…", action: model.showCloneSheet)
                 SettingsLink { Label("Settings", systemImage: "gearshape") }
+                AppZoomControls()
             }
         }
     }

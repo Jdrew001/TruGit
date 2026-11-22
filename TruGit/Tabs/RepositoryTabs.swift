@@ -18,6 +18,11 @@ struct SwitchStep {
     var action: GitBranchAction { .replaySwitch(from: from, expectedHead: head, to: to) }
 }
 
+enum BranchPushStatus: Equatable {
+    case pushing(String)
+    case completed(String)
+}
+
 @MainActor
 @Observable
 final class RepositoryTab: Identifiable {
@@ -31,6 +36,7 @@ final class RepositoryTab: Identifiable {
         }
     }
     var selection: RepositorySelection? = .history
+    var pushStatus: BranchPushStatus?
     var switchUndo: SwitchStep?
     var switchRedo: SwitchStep?
     var referenceFilter = ""
@@ -63,6 +69,13 @@ final class RepositoryTab: Identifiable {
         selection = .history
         historySelection = .workInProgress
         commitJump = nil
+    }
+
+    func selectReference(_ reference: RepositoryReference) {
+        selection = .reference(reference.id)
+        diff = nil
+        historySelection = .commit(reference.commitID)
+        commitJump = CommitJump(commitID: reference.commitID)
     }
 }
 
@@ -119,6 +132,7 @@ struct RepositoryTabs: View {
             .compactMapValues { $0.first?.id }
         HStack(spacing: 0) {
             sidebarButton
+            AppZoomControls()
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     HStack(spacing: 0) {
@@ -153,9 +167,11 @@ struct RepositoryTabs: View {
         .overlay(alignment: .bottom) { WorkspaceColors.divider.frame(height: 1) }
         .sheet(item: $editingAlias) { tab in
             TabAliasEditor(tab: tab) { name in model.setAlias(name, for: tab) }
+                .zoomAppDialog()
         }
         .sheet(item: $groupEditor) { editor in
             GroupNameEditor(editor: editor) { model.organizeTabs(editor.change($0)) }
+                .zoomAppDialog()
         }
     }
 

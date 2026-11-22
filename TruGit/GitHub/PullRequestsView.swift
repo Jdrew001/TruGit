@@ -128,6 +128,7 @@ private struct PullBrowser: View {
             NewPullRequestView(api: api, repo: repo, repos: remotes, localBranch: branch) { created in
                 preferred = created.number; filter = "open"; page = 1; revision += 1
             }
+            .zoomAppDialog()
         }
     }
     private var inbox: some View {

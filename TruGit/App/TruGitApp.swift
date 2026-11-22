@@ -5,14 +5,17 @@ struct TruGitApp: App {
     @StateObject private var updates = AppUpdates()
     @State private var github = GitHubAccount()
     @State private var model = RepositoryModel()
+    @AppStorage("appZoom") private var zoom = AppZoom.initialValue
 
     var body: some Scene {
         Window("TruGit", id: "main") {
-            RepositoryView(model: model)
-                .environmentObject(updates)
-                .environment(github)
-                .frame(minWidth: 860, minHeight: 480)
-                .preferredColorScheme(.dark)
+            AppZoomViewport {
+                RepositoryView(model: model)
+                    .environmentObject(updates)
+                    .environment(github)
+            }
+            .environment(\.appZoom, $zoom)
+            .preferredColorScheme(.dark)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1340, height: 800)
@@ -23,6 +26,7 @@ struct TruGitApp: App {
                 }
             }
             CommitCommands()
+            AppZoomCommands(zoom: $zoom)
             CommandGroup(replacing: .newItem) {
                 Button("Add Repository…", action: model.openRepository)
                     .keyboardShortcut("o")
@@ -39,7 +43,13 @@ struct TruGitApp: App {
                     .disabled(model.activeTab == nil || model.isLoading)
             }
         }
-        Settings { TruGitSettings().environment(github).environmentObject(updates) }
+        Settings {
+            TruGitSettings()
+                .zoomAppDialog()
+                .environment(\.appZoom, $zoom)
+                .environment(github)
+                .environmentObject(updates)
+        }
     }
 }
 

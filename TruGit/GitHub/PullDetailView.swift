@@ -131,6 +131,7 @@ struct PullDetailView: View {
                 showFiles = false
                 revision += 1
             }
+            .zoomAppDialog()
         }
     }
 

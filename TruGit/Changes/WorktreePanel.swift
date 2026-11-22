@@ -17,7 +17,7 @@ struct WorktreePanel: View {
     let repository: GitRepository
     let branchColor: Color
     @Binding var draft: CommitDraft
-    let upstreamID: String?
+    let branch: RepositoryReference?
     let remotes: [String]
     let canCombine: Bool
     let busy: Bool
@@ -50,18 +50,19 @@ struct WorktreePanel: View {
 
     private var publishRemote: String? {
         if let chosenRemote, remotes.contains(chosenRemote) { return chosenRemote }
+        if let upstream = branch?.upstreamTarget, remotes.contains(upstream.remote) { return upstream.remote }
         return remotes.contains("origin") ? "origin" : remotes.first
     }
 
     private var destination: CommitPushDestination? {
         guard canCombine else { return nil }
-        if let upstreamID { return CommitPushDestination(branch: repository.branch, route: .upstream(upstreamID)) }
+        if let upstream = branch?.pushUpstream { return CommitPushDestination(branch: repository.branch, route: .upstream(upstream)) }
         guard let publishRemote else { return nil }
-        return CommitPushDestination(branch: repository.branch, route: .publish(remote: publishRemote))
+        return CommitPushDestination(branch: repository.branch, route: .publish(remote: publishRemote, replacingUpstream: branch?.upstreamID))
     }
 
     private var combinedHelp: String {
-        if let upstreamID { return "Commit staged changes and push to " + upstreamID }
+        if let upstream = branch?.pushUpstream { return "Commit staged changes and push to " + upstream.displayName }
         if let publishRemote { return "Commit staged changes and publish “" + repository.branch + "” to " + publishRemote }
         return "Choose a remote repository to commit and push"
     }
@@ -106,7 +107,7 @@ struct WorktreePanel: View {
                 Spacer()
                 Button("Cancel") { showingRemoteSetup = false }.keyboardShortcut(.cancelAction)
                 Button(selectedAction.title(amending: draft.amendment != nil)) {
-                    let target = CommitPushDestination(branch: repository.branch, route: .publish(remote: "origin", newURL: location))
+                    let target = CommitPushDestination(branch: repository.branch, route: .publish(remote: "origin", newURL: location, replacingUpstream: branch?.upstreamID))
                     showingRemoteSetup = false
                     perform(.commit(draft, expectedHead: repository.headID, push: target))
                 }
@@ -218,12 +219,16 @@ struct WorktreePanel: View {
                 TextField("Description", text: $draft.active.body, axis: .vertical)
                     .lineLimit(2...4).textFieldStyle(.plain)
                     .padding(7).background(WorkspaceColors.history, in: RoundedRectangle(cornerRadius: 4))
-                if selectedAction == .commitAndPush, upstreamID == nil, canCombine, !remotes.isEmpty {
+                if selectedAction == .commitAndPush, branch?.pushUpstream == nil, canCombine, !remotes.isEmpty {
+                    if let upstream = branch?.upstreamTarget, let publishRemote {
+                        Text("Change upstream from " + upstream.displayName + " to " + publishRemote + "/" + repository.branch)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Picker("Publish to", selection: Binding(get: { publishRemote }, set: { chosenRemote = $0 })) {
                         ForEach(remotes, id: \.self) { Text($0).tag(Optional($0)) }
                     }
                 }
-                if selectedAction == .commitAndPush, canCombine, upstreamID == nil, remotes.isEmpty {
+                if selectedAction == .commitAndPush, canCombine, branch?.pushUpstream == nil, remotes.isEmpty {
                     Text("Choose a push destination when you continue.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -232,7 +237,7 @@ struct WorktreePanel: View {
             .disabled(busy)
             .font(.caption).padding(9)
         }
-        .sheet(isPresented: $showingRemoteSetup) { remoteSetup }
+        .sheet(isPresented: $showingRemoteSetup) { remoteSetup.zoomAppDialog() }
         .controlSize(.small)
         .background(WorkspaceColors.sidebar)
         .confirmationDialog("Discard unstaged changes?", isPresented: Binding(

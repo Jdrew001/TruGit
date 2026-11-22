@@ -6,6 +6,14 @@ struct RepositoryReference: Identifiable, Hashable, Sendable {
         case remote = "Remote Branches"
         case tag = "Tags"
 
+        var label: String {
+            switch self {
+            case .local: "Local"
+            case .remote: "Remote"
+            case .tag: "Tag"
+            }
+        }
+
         var prefix: String {
             switch self {
             case .local: "refs/heads/"
@@ -28,7 +36,16 @@ struct RepositoryReference: Identifiable, Hashable, Sendable {
     let kind: Kind
     let commitID: String
     let upstreamID: String?
+    var upstreamTarget: RemoteBranchTarget? = nil
     var remoteTarget: RemoteBranchTarget? = nil
+
+    // Compare the branch on the server, even with a custom fetch refspec.
+    var pushUpstream: RemoteBranchTarget? {
+        guard kind == .local, upstreamID != nil, let target = upstreamTarget, target.remote != ".", target.ref == id else { return nil }
+        return target
+    }
+    var isGitHubRemote = false
+    var locationLabel: String { isGitHubRemote ? "GitHub remote" : kind.label }
 }
 
 struct GitCommit: Identifiable, Hashable, Sendable {
@@ -144,23 +161,26 @@ enum GitHistory {
     static func references(in root: URL) async throws -> [RepositoryReference] {
         let output = try await GitRepository.git([
             "for-each-ref",
-            "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00%(symref)%00%(upstream)",
+            "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00%(symref)%00%(upstream)%00%(upstream:remotename)%00%(upstream:remoteref)",
             "refs/heads", "refs/remotes", "refs/tags",
         ], in: root)
         let mappings = try await RemoteBranchTarget.fetchMappings(in: root)
+        let gitHubRemotes: Set<String> = mappings.isEmpty ? [] : await GitHubRepository.fetchRemoteNames(in: root)
         return output.split(separator: 0x0A).compactMap { record in
             let fields = record.split(separator: 0, omittingEmptySubsequences: false)
                 .map { String(decoding: $0, as: UTF8.self) }
-            guard fields.count == 7, fields[5].isEmpty,
+            guard fields.count == 9, fields[5].isEmpty,
                   let kind = RepositoryReference.Kind.allCases.first(where: { fields[0].hasPrefix($0.prefix) })
             else { return nil }
 
             let commitID = fields[2] == "commit" ? fields[1] : fields[3]
             guard fields[2] == "commit" || fields[4] == "commit" else { return nil }
+            let target = kind == .remote ? RemoteBranchTarget.resolve(refID: fields[0], mappings: mappings) : nil
             return RepositoryReference(
                 id: fields[0], name: String(fields[0].dropFirst(kind.prefix.count)),
                 kind: kind, commitID: commitID, upstreamID: fields[6].isEmpty ? nil : fields[6],
-                remoteTarget: kind == .remote ? RemoteBranchTarget.resolve(refID: fields[0], mappings: mappings) : nil
+                upstreamTarget: !fields[7].isEmpty && fields[8].hasPrefix("refs/heads/") ? RemoteBranchTarget(remote: fields[7], ref: fields[8]) : nil,
+                remoteTarget: target, isGitHubRemote: target.map { gitHubRemotes.contains($0.remote) } ?? false
             )
         }
     }

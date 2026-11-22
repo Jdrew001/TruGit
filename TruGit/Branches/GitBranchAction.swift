@@ -58,6 +58,7 @@ enum GitBranchAction: Sendable {
     case revision(RevisionAction)
     case skipIntegration(GitIntegration)
     case pull(RepositoryReference), push(RepositoryReference), stash
+    case publish(RepositoryReference, remote: String, newURL: String? = nil)
     case stashEntry(StashEntryAction, GitStash)
     case replaySwitch(from: String, expectedHead: String, to: String)
     case deleteBranch(BranchDeletion, forceLocal: Bool)
@@ -76,7 +77,7 @@ enum GitBranchAction: Sendable {
         case .revision(let action): action.operation.rawValue + " stopped"
         case .skipIntegration: "Couldn’t skip commit"
         case .pull: "Pull failed"
-        case .push: "Push failed"
+        case .push, .publish: "Push failed"
         case .stash: "Couldn’t stash changes"
         case .stashEntry(.apply, _): "Couldn’t apply stash"
         case .stashEntry(.pop, _): "Couldn’t pop stash"
@@ -94,7 +95,23 @@ enum GitBranchAction: Sendable {
         }
     }
 
+    var pushDestination: String? {
+        switch self {
+        case .publish(let branch, let remote, _): return remote + "/" + branch.name
+        case .push(let branch): return branch.upstreamTarget?.displayName
+        case .revision(let action) where action.operation == .publish: return action.remoteName + "/" + action.name
+        case .revision(let action) where action.operation.pushes: return action.target.name
+        case .worktree(.commit(_, _, let push?)):
+            switch push.route {
+            case .publish(let remote, _, _): return remote + "/" + push.branch
+            case .upstream(let target): return target.displayName
+            }
+        default: return nil
+        }
+    }
+
     var returnsToHistory: Bool {
+        if pushDestination != nil { return false }
         if case .pushTag = self { return false }
         if case .revision(let action) = self, action.operation == .tag { return false }
         if case .fetch = self { return false }
@@ -124,18 +141,28 @@ enum GitBranchAction: Sendable {
             return
         case .skipIntegration(let integration):
             arguments = [integration.gitCommand, "--skip"]
-        case .pull(let branch), .push(let branch):
+        case .publish(let branch, let remote, let url):
+            guard branch.pushUpstream == nil, try await GitIntegration.read(in: root) == nil else {
+                throw RepositoryReadError.commandFailed("The branch state changed. Review the push again.")
+            }
+            _ = try await reviewedUpstream(of: branch, in: root)
+            let destination = CommitPushDestination(branch: branch.name, route: .publish(remote: remote, newURL: url))
+            try await destination.configureRemoteIfNeeded(in: root)
+            _ = try await GitRepository.git(["remote", "get-url", "--push", "--", remote], in: root)
+            arguments = ["push", "--set-upstream", "--", remote, branch.id + ":" + branch.id]
+        case .push(let branch):
+            guard branch.pushUpstream != nil, try await GitIntegration.read(in: root) == nil,
+                  let upstream = try await reviewedUpstream(of: branch, in: root) else {
+                throw RepositoryReadError.commandFailed("The branch state changed. Review the push again.")
+            }
+            arguments = ["push", "--", upstream.remote, branch.commitID + ":" + upstream.ref]
+        case .pull(let branch):
             let state = try await GitRepository.read(at: root)
-            guard state.branch == branch.name, state.headID == branch.commitID, state.integration == nil else {
-                throw RepositoryReadError.commandFailed("The current branch changed. Refresh and try again.")
+            guard state.branch == branch.name, state.headID == branch.commitID, state.integration == nil,
+                  let upstream = try await reviewedUpstream(of: branch, in: root) else {
+                throw RepositoryReadError.commandFailed("The current branch or its upstream changed. Refresh and try again.")
             }
-            let data = try await GitRepository.git(["for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)%00%(upstream)", branch.id], in: root)
-            let fields = data.dropLast().split(separator: 0, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
-            guard fields.count == 3, !fields[0].isEmpty, fields[1].hasPrefix("refs/heads/"), branch.upstreamID == fields[2] else {
-                throw RepositoryReadError.commandFailed("The upstream branch changed. Refresh and try again.")
-            }
-            if case .push = self { arguments = ["push", "--", fields[0], branch.commitID + ":" + fields[1]] }
-            else { arguments = ["pull", "--ff-only", "--no-rebase", "--", fields[0], fields[1]] }
+            arguments = ["pull", "--ff-only", "--no-rebase", "--", upstream.remote, upstream.ref]
         case .deleteBranch(let deletion, let forceLocal):
             try await deletion.run(in: root, forceLocal: forceLocal)
             return
@@ -169,12 +196,32 @@ enum GitBranchAction: Sendable {
         _ = try await GitRepository.git(arguments, in: root)
     }
 
+    /// Validate the selected ref independently of the worktree's checked-out branch.
+    private func reviewedUpstream(of branch: RepositoryReference, in root: URL) async throws -> RemoteBranchTarget? {
+        let format = "--format=%(refname)%00%(objectname)%00%(upstream)%00%(upstream:remotename)%00%(upstream:remoteref)"
+        let data = try await GitRepository.git(["for-each-ref", format, branch.id], in: root)
+        let fields = data.dropLast().split(separator: 0, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
+        guard fields.count == 5, branch.kind == .local, fields[0] == branch.id, fields[1] == branch.commitID,
+              fields[2] == (branch.upstreamID ?? "") else {
+            throw RepositoryReadError.commandFailed("The branch or its upstream changed. Refresh and try again.")
+        }
+        guard branch.upstreamID != nil else { return nil }
+        guard !fields[3].isEmpty, fields[4].hasPrefix("refs/heads/") else {
+            throw RepositoryReadError.commandFailed("The upstream does not identify a destination branch.")
+        }
+        let upstream = RemoteBranchTarget(remote: fields[3], ref: fields[4])
+        guard upstream == branch.upstreamTarget else {
+            throw RepositoryReadError.commandFailed("The remote destination changed. Review the branch again.")
+        }
+        return upstream
+    }
 }
 
 struct RemoteBranchTarget: Hashable, Sendable {
     let remote: String
     let ref: String
     var name: String { String(ref.dropFirst("refs/heads/".count)) }
+    var displayName: String { remote == "." ? name : remote + "/" + name }
 
     static func resolve(_ branch: RepositoryReference, in root: URL) async throws -> Self {
         let mappings = try await fetchMappings(in: root)

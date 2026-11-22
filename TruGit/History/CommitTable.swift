@@ -10,7 +10,7 @@ struct HistoryColumns: Equatable {
     let date: CGFloat
 
     init(width: CGFloat, lanes: Int, preferredRefs: CGFloat) {
-        let automatic = min(154, max(54, width * 0.19))
+        let automatic = min(216, max(72, width * 0.24))
         graph = min(width * 0.25, max(min(254, width * 0.12), min(254, CGFloat(lanes) * 23 + 15)))
         refLimits = 54...max(54, width - graph - min(160, width * 0.35))
         refs = min(refLimits.upperBound, max(refLimits.lowerBound, preferredRefs > 0 ? preferredRefs : automatic))
@@ -55,8 +55,8 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
     let createTag: (RevisionPoint) -> Void
     let canAct: Bool
     let onDrop: (BranchDrag, RevisionPoint) -> Bool
-    let expandedBadges: ([RepositoryReference], CGFloat) -> AnyView
-    @ViewBuilder let badges: ([RepositoryReference]) -> Badges
+    let expandedBadges: ([GraphReferenceBadge], CGFloat) -> AnyView
+    @ViewBuilder let badges: ([GraphReferenceBadge]) -> Badges
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -64,8 +64,8 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
         let table = HistoryTableView()
         table.branchMenu = { [weak coordinator = context.coordinator] index, ref in coordinator?.branchMenu(at: index, clicked: ref) }
         table.hoverReferences = { [weak coordinator = context.coordinator] row in
-            guard let coordinator, let point = coordinator.point(at: row), let refs = coordinator.refs[point.oid] else { return nil }
-            return (refs, { coordinator.parent.expandedBadges(refs, $0) })
+            guard let coordinator, let point = coordinator.point(at: row), let badges = coordinator.badgesByCommit[point.oid] else { return nil }
+            return (point.oid, badges, { coordinator.parent.expandedBadges(badges, $0) })
         }
         table.root = snapshot.repository.root
         table.setDraggingSourceOperationMask(.copy, forLocal: true)
@@ -100,7 +100,8 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
         guard let table = scroll.documentView as? NSTableView else { return }
         let coordinator = context.coordinator
         let layoutChanged = coordinator.parent.columns != columns
-        if layoutChanged || coordinator.graphID != graph.id || coordinator.snapshotID != snapshot.id {
+        let actionsChanged = coordinator.parent.canAct != canAct
+        if actionsChanged || layoutChanged || coordinator.graphID != graph.id || coordinator.snapshotID != snapshot.id {
             (table as? HistoryTableView)?.referencePreview.dismiss()
         }
         coordinator.parent = self
@@ -116,6 +117,16 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
                 return left.id < right.id
             }
             coordinator.refs = Dictionary(grouping: ordered, by: \.commitID)
+            coordinator.badgesByCommit.removeAll(keepingCapacity: true)
+            for badge in snapshot.referenceBadges {
+                // Keep a single label even when only a remote tip is on the loaded page.
+                if let anchor = badge.references.first(where: { graph.indexByID[$0.commitID] != nil }) {
+                    coordinator.badgesByCommit[anchor.commitID, default: []].append(badge)
+                }
+            }
+            table.reloadData()
+        } else if actionsChanged {
+            // Hosted badges capture their checkout and menu actions when their row is configured.
             table.reloadData()
         } else if layoutChanged {
             table.enumerateAvailableRowViews { rowView, _ in
@@ -140,6 +151,7 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
         var snapshotID: UUID?
         fileprivate var counts = WorkingChangeCounts([])
         var refs: [String: [RepositoryReference]] = [:]
+        var badgesByCommit: [String: [GraphReferenceBadge]] = [:]
         var jump: CommitJump?
         var updating = false
 
@@ -195,9 +207,9 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
             cell.identifier = identifier
             let graph = parent.graph
             let item = graph.rows[row - commitOffset]
-            let refs = refs[item.id] ?? []
+            let badges = badgesByCommit[item.id] ?? []
             cell.configure(item, columns: parent.columns, lanes: graph.laneCount, head: item.id == parent.snapshot.repository.headID,
-                           badges: refs.isEmpty ? nil : AnyView(parent.badges(refs).id(item.id)))
+                           badges: badges.isEmpty ? nil : AnyView(parent.badges(badges).id(item.id)))
             return cell
         }
 
@@ -263,8 +275,9 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
         }
 
         func branchMenu(at row: Int, clicked: RepositoryReference?) -> NSMenu? {
-            guard let point = point(at: row) else { return nil }
-            let branches = (refs[point.oid] ?? []).filter { clicked == nil || clicked?.id == $0.id }
+            guard let revision = clicked.map(RevisionPoint.init) ?? point(at: row) else { return nil }
+            let point = RevisionPoint(commit: revision.oid)
+            let branches = clicked.map { [$0] } ?? refs[point.oid] ?? []
             let menu = NSMenu()
             menu.autoenablesItems = false
             func addAction(_ label: String, _ point: RevisionPoint, _ operation: RevisionOperation?, to menu: NSMenu) {
@@ -275,8 +288,21 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
                 menu.addItem(item)
             }
             let locals = parent.snapshot.references.filter { $0.kind == .local }
-            let destination = locals.first(where: { $0.name == parent.snapshot.repository.branch }) ?? locals.first
-            let revision = clicked.map(RevisionPoint.init) ?? point
+            let current = parent.snapshot.checkedOutBranch
+            let destination = current ?? locals.first
+            func addBranchShortcuts(_ ref: RepositoryReference) {
+                let branch = RevisionPoint(ref)
+                if ref.kind == .local, ref.id != current?.id {
+                    addAction("Switch to “" + ref.name + "”…", branch, .checkout, to: menu)
+                }
+                if parent.snapshot.canMergeBranches(from: ref) {
+                    addAction("Merge “" + ref.name + "” into…", branch, .merge, to: menu)
+                }
+            }
+            if let clicked, clicked.kind != .tag {
+                addBranchShortcuts(clicked)
+                if !menu.items.isEmpty { menu.addItem(.separator()) }
+            }
             if case .commits(let ids) = parent.selection, ids.contains(point.oid) {
                 for operation in CommitBatchOperation.allCases {
                     let label = operation.rawValue + " " + String(ids.count) + " selected commits…"
@@ -303,6 +329,7 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
             if !branches.isEmpty { menu.addItem(.separator()) }
             for ref in branches {
                 let branch = RevisionPoint(ref)
+                if clicked == nil { addBranchShortcuts(ref) }
                 addAction("Actions for “" + ref.name + "”…", branch, nil, to: menu)
                 if ref.kind == .local, ref.upstreamID != nil {
                     addAction("Force push “" + ref.name + "” with lease…", branch, .forcePush, to: menu)
@@ -366,7 +393,7 @@ final class HistoryTableView: NSTableView {
     var draggedCommits: BranchDrag?
 
     let referencePreview = GraphReferencePreview()
-    var hoverReferences: ((Int) -> ([RepositoryReference], (CGFloat) -> AnyView)?)?
+    var hoverReferences: ((Int) -> (String, [GraphReferenceBadge], (CGFloat) -> AnyView)?)?
     private var departingCommit: String?
     private var mouseMonitor: Any?
     private var hoverArea: NSTrackingArea?
@@ -424,15 +451,21 @@ final class HistoryTableView: NSTableView {
         let index = row(at: location)
         guard visibleRect.contains(location), index >= 0, let cell = view(atColumn: 0, row: index, makeIfNecessary: false) as? CommitCell,
               let anchor = cell.hoverAnchor(at: cell.convert(location, from: self)),
-              let (refs, content) = hoverReferences?(index) else {
+              let (commitID, badges, content) = hoverReferences?(index) else {
             departingCommit = nil
             referencePreview.dismiss()
             return
         }
         // Let the pointer leave the source badge before opening that stack again.
-        if let departingCommit, departingCommit == refs.first?.commitID { return }
+        if let departingCommit, departingCommit == commitID { return }
         departingCommit = nil
-        referencePreview.hover(refs, anchor: convert(anchor, from: cell), in: self, content: content)
+        // Expanding a long label here would move the remote icon out from under the pointer.
+        if let hit = BranchMouseView.reference(at: windowPoint, window: window), hit.kind == .remote,
+           badges.contains(where: { $0.reference.kind == .local && $0.remotes.contains(hit) }) {
+            referencePreview.dismiss()
+            return
+        }
+        referencePreview.hover(badges, at: commitID, anchor: convert(anchor, from: cell), in: self, content: content)
         referencePreview.updateHighlight(at: windowPoint, in: window)
     }
 
@@ -481,7 +514,6 @@ private final class CommitCell: NSTableCellView {
     private let subject = NSTextField(labelWithString: "")
     private let author = NSTextField(labelWithString: "")
     private let date = NSTextField(labelWithString: "")
-    private var initials: NSAttributedString?
     private var host: NSHostingView<AnyView>?
     private var row: CommitGraph.Row?
     private var lanes = 1
@@ -519,10 +551,6 @@ private final class CommitCell: NSTableCellView {
         }
         author.stringValue = row.commit.author
         date.stringValue = row.commit.date?.formatted(date: .numeric, time: .shortened) ?? ""
-        initials = NSAttributedString(string: row.commit.authorInitials, attributes: [
-            .font: NSFont.systemFont(ofSize: 8, weight: .bold),
-            .foregroundColor: NSColor(WorkspaceColors.history)
-        ])
         toolTip = "\(row.commit.subject) — \(row.commit.author)"
         if let badges {
             if let host { host.rootView = badges }
@@ -575,17 +603,10 @@ private final class CommitCell: NSTableCellView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let row, let cg = NSGraphicsContext.current?.cgContext else { return }
-        let c = columns
         func point(_ lane: Int, _ height: Double) -> CGPoint {
             CGPoint(x: graphX(lane: lane), y: bounds.height * height)
         }
         let center = point(row.column, 0.5)
-        let stripe = CGRect(x: center.x, y: 3, width: max(0, c.refs + c.graph - center.x), height: bounds.height - 6)
-        let color = BranchColors.native(row.color)
-        cg.setFillColor(color.withAlphaComponent(0.085).cgColor)
-        cg.fill(stripe)
-        cg.setFillColor(color.withAlphaComponent(0.8).cgColor)
-        cg.fill(CGRect(x: stripe.maxX - 1, y: stripe.minY, width: 1, height: stripe.height))
         func tint(_ index: Int) -> CGColor { BranchColors.native(index).cgColor }
         cg.setLineWidth(2)
         for segment in row.segments {
@@ -599,7 +620,7 @@ private final class CommitCell: NSTableCellView {
             cg.strokePath()
         }
         cg.setLineDash(phase: 0, lengths: [])
-        let dot = CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8)
+        let dot = CGRect(x: center.x - 4.5, y: center.y - 4.5, width: 9, height: 9)
         if row.commit.parents.count > 1 {
             cg.move(to: CGPoint(x: center.x, y: center.y - 6))
             cg.addLine(to: CGPoint(x: center.x + 6, y: center.y))
@@ -611,17 +632,12 @@ private final class CommitCell: NSTableCellView {
             cg.drawPath(using: .fillStroke)
         } else {
             cg.setFillColor(tint(row.color))
-            let marker = dot.insetBy(dx: -5, dy: -5)
-            cg.fillEllipse(in: marker)
-            if let initials {
-                let size = initials.size()
-                initials.draw(at: CGPoint(x: center.x - size.width / 2, y: center.y - size.height / 2))
-            }
+            cg.fillEllipse(in: dot)
         }
         if head {
             cg.setStrokeColor(tint(row.color))
-            cg.setLineWidth(1)
-            cg.strokeEllipse(in: dot.insetBy(dx: -7, dy: -7))
+            cg.setLineWidth(1.5)
+            cg.strokeEllipse(in: dot.insetBy(dx: -4, dy: -4))
         }
     }
 }

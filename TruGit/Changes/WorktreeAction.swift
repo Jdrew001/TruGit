@@ -22,8 +22,8 @@ struct CommitDraft: Sendable {
 struct CommitPushDestination: Sendable {
     let branch: String
     enum Route: Sendable {
-        case upstream(String)
-        case publish(remote: String, newURL: String? = nil)
+        case upstream(RemoteBranchTarget)
+        case publish(remote: String, newURL: String? = nil, replacingUpstream: String? = nil)
     }
 
     let route: Route
@@ -44,9 +44,17 @@ struct CommitPushDestination: Sendable {
     }
 
     func configureRemoteIfNeeded(in root: URL) async throws {
-        guard case .publish(let remote, let url?) = route else { return }
+        guard case .publish(let remote, let url?, _) = route else { return }
         guard Self.validRemoteURL(url) else { throw RepositoryReadError.commandFailed("Enter a valid Git remote URL or an absolute repository path.") }
-        _ = try await GitRepository.git(["remote", "add", "--", remote, url], in: root)
+        let configured = try await GitRepository.git(["remote"], in: root)
+        if String(decoding: configured, as: UTF8.self).split(separator: "\n").contains(Substring(remote)) {
+            let current = try await GitRepository.git(["remote", "get-url", "--push", "--all", "--", remote], in: root)
+            guard String(decoding: current, as: UTF8.self).split(separator: "\n") == [Substring(url)] else {
+                throw RepositoryReadError.commandFailed("The push address for “" + remote + "” changed. Review the destination again.")
+            }
+        } else {
+            _ = try await GitRepository.git(["remote", "add", "--", remote, url], in: root)
+        }
     }
 
     func pushCommittedChanges(in root: URL) async throws {
@@ -58,12 +66,10 @@ struct CommitPushDestination: Sendable {
             }
             let push: GitBranchAction
             switch route {
-            case .upstream(let upstreamID) where upstreamID == ref.upstreamID:
+            case .upstream(let upstream) where upstream == ref.pushUpstream:
                 push = .push(ref)
-            case .publish(let publishRemote, _) where ref.upstreamID == nil:
-                let point = RevisionPoint(ref)
-                push = .revision(RevisionAction(operation: .publish, source: point, target: point, mainline: nil,
-                                                name: branch, remoteName: publishRemote))
+            case .publish(let publishRemote, _, let previous) where ref.pushUpstream == nil && ref.upstreamID == previous:
+                push = .publish(ref, remote: publishRemote)
             default:
                 throw RepositoryReadError.commandFailed("The upstream changed. Review the destination before pushing.")
             }

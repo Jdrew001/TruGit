@@ -24,11 +24,13 @@ struct RepositoryWorkspace: View {
     @State private var draggingSidebar: CGFloat?
     @State private var searching = false
     @State private var pushBranch: RepositoryReference?
+    @State private var publishBranch: RepositoryReference?
     @State private var collapsedSearchGroups: Set<RepositoryReference.Kind> = []
     @State private var tagTarget: RevisionPoint?
     @State private var branchDraft: BranchDraft?
     @State private var newBranchName = ""
     @State private var revisionReview: RevisionReview?
+    @State private var mergeReview: BranchMergeReview?
     @State private var commitBatch: CommitBatch?
     @State private var deleting: BranchDeletion?
     @State private var stashToDelete: GitStash?
@@ -43,6 +45,25 @@ struct RepositoryWorkspace: View {
                 }
             } else {
                 commandBar
+                if let status = tab.pushStatus {
+                    HStack(spacing: 7) {
+                        switch status {
+                        case .pushing(let destination):
+                            ProgressView().controlSize(.small)
+                            Text("Pushing to " + destination + "…")
+                        case .completed(let destination):
+                            Label("Push complete · " + destination, systemImage: "checkmark.circle.fill")
+                        }
+                        Spacer()
+                    }
+                    .font(.callout).padding(.horizontal, 12).padding(.vertical, 5)
+                    .background(WorkspaceColors.panel)
+                    .task(id: status) {
+                        guard case .completed = status else { return }
+                        try? await Task.sleep(for: .seconds(8))
+                        if !Task.isCancelled, tab.pushStatus == status { tab.pushStatus = nil }
+                    }
+                }
                 if let integration = snapshot.repository.integration {
                     IntegrationBar(integration: integration, operation: snapshot.operationTitle, hasConflicts: hasConflicts,
                                    isBusy: !canChangeBranch, perform: performBranchAction)
@@ -84,10 +105,10 @@ struct RepositoryWorkspace: View {
             Button("Create and Switch") {
                 performBranchAction(draft.action(named: trimmedBranchName))
             }
-            .disabled(trimmedBranchName.isEmpty || !canMoveBranches)
+            .disabled(trimmedBranchName.isEmpty || branchNameTaken || !canMoveBranches)
             Button("Cancel", role: .cancel) {}
         } message: { draft in
-            Text(draft.message)
+            Text(branchNameTaken ? draft.message + " A local branch already uses that name. Enter a different name." : draft.message)
         }
         .alert("Delete Stash?", isPresented: Binding(get: { stashToDelete != nil }, set: { if !$0 { stashToDelete = nil } }),
                presenting: stashToDelete) { stash in
@@ -96,27 +117,42 @@ struct RepositoryWorkspace: View {
         } message: { stash in
             Text("Remove \(stash.selector) “\(stash.subject)” from this repository’s stash list?")
         }
+        .sheet(item: $publishBranch) { branch in
+            PublishBranchSheet(branch: branch, remotes: snapshot.remotes) { remote, url in
+                performBranchAction(.publish(branch, remote: remote, newURL: url))
+            }
+            .zoomAppDialog()
+        }
         .sheet(item: $tagTarget) { point in
             CreateTagSheet(point: point, tags: Set(snapshot.references.filter { $0.kind == .tag }.map(\.name)),
                            remotes: snapshot.remotes) { performBranchAction(.revision($0)) }
+                .zoomAppDialog()
         }
         .sheet(item: $deleting) { choice in
             BranchDeletePrompt(choice: choice) { deletion, force in
                 performBranchAction(.deleteBranch(deletion, forceLocal: force))
             }
+            .zoomAppDialog()
         }
         .sheet(item: $commitBatch) { batch in
             CommitBatchSheet(batch: batch, otherWorktree: snapshot.otherWorktree, addFromGraph: pickMoreCommits) { performBranchAction(.revision($0)) }
+                .zoomAppDialog()
+        }
+        .sheet(item: $mergeReview) { review in
+            MergeBranchesSheet(review: review, root: tab.id, current: snapshot.repository.branch, otherWorktree: snapshot.otherWorktree,
+                               canMerge: canMoveBranches) { performBranchAction(.revision($0)) }
+                .zoomAppDialog()
         }
         .sheet(item: $revisionReview) { review in
             RevisionActionsSheet(review: review, root: tab.id, current: snapshot.repository.branch, otherWorktree: snapshot.otherWorktree, addFromGraph: pickMoreCommits) {
                 performBranchAction(.revision($0))
             }
+            .zoomAppDialog()
         }
     }
 
     private var current: RepositoryReference? {
-        snapshot.references.first { $0.kind == .local && $0.name == snapshot.repository.branch }
+        snapshot.checkedOutBranch
     }
 
     private var commandBar: some View {
@@ -129,14 +165,23 @@ struct RepositoryWorkspace: View {
             .modifier(SelectorStyle(caption: "Repository", value: tab.title))
             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
             Menu {
+                if let current {
+                    Button("Show Checked-Out Branch in Graph", systemImage: "scope") { selectReference(current) }
+                    Divider()
+                }
                 ForEach(snapshot.references.filter { $0.kind == .local }) { ref in
                     Button { checkout(ref) } label: {
-                        if current?.id == ref.id { Label(ref.name, systemImage: "checkmark") }
+                        if snapshot.isCheckedOut(ref) { Label(ref.name, systemImage: "checkmark") }
                         else { Text(ref.name) }
                     }
+                    .disabled(!canMoveBranches)
                 }
-            } label: { Text(snapshot.repository.branch) }
-            .modifier(SelectorStyle(caption: "Branch", value: snapshot.repository.branch)).disabled(!canMoveBranches)
+            } label: {
+                Text(snapshot.repository.branch).lineLimit(1).truncationMode(.middle)
+            }
+            .modifier(SelectorStyle(caption: current == nil && snapshot.repository.headID != nil ? "Revision" : "Checked out",
+                                    value: snapshot.repository.branch))
+            .help(snapshot.repository.branch)
             Spacer(minLength: 4)
             Group {
                 barButton("Undo", "arrow.uturn.backward", "Undo the last branch switch", enabled: valid(tab.switchUndo)) {
@@ -146,9 +191,20 @@ struct RepositoryWorkspace: View {
                     if let step = tab.switchRedo { performBranchAction(step.action) }
                 }
                 barButton("Pull", "arrow.down.to.line", "Fast-forward from the upstream branch", enabled: canMoveBranches && current?.upstreamID != nil) { if let current { performBranchAction(.pull(current)) } }
-                barButton("Push", "arrow.up.to.line", pushHelp, enabled: canPush, action: requestPush)
+                barButton("Push", "arrow.up.to.line", pushHelp(for: toolbarPushBranch), enabled: canMoveBranches && toolbarPushBranch != nil) {
+                    if let branch = toolbarPushBranch { requestPush(branch) }
+                }
                 barButton("Branch", "arrow.triangle.branch", "Create a branch at HEAD", enabled: canMoveBranches && current != nil) {
                     if let current { nameBranch(.create(current)) }
+                }
+                barButton("Merge", RevisionOperation.merge.icon, "Merge one branch into another",
+                          enabled: canMoveBranches && snapshot.canMergeBranches()) {
+                    if let selectedReference, tab.historySelection == .commit(selectedReference.commitID),
+                       snapshot.canMergeBranches(from: selectedReference) {
+                        showMerge(from: selectedReference)
+                    } else {
+                        showMerge()
+                    }
                 }
                 barButton("Tag", "tag", "Create a tag at the current commit", enabled: canTagHead, action: tagHead)
                 barButton("Stash", "tray.and.arrow.down", "Stash tracked and untracked changes", enabled: canMoveBranches && !snapshot.repository.changes.isEmpty && !hasConflicts) { performBranchAction(.stash) }
@@ -181,11 +237,12 @@ struct RepositoryWorkspace: View {
                         tab.commitJump = CommitJump(commitID: commit.id)
                         searching = false
                     }
+                    .zoomAppDialog()
                 }
         }
         .padding(.horizontal, 12).frame(height: 46)
         .background(WorkspaceColors.panel)
-        .confirmationDialog("Push “" + (pushBranch?.name ?? "") + "” to its upstream?", isPresented: Binding(
+        .confirmationDialog("Push “" + (pushBranch?.name ?? "") + "” to “" + (pushBranch?.upstreamTarget?.displayName ?? "") + "”?", isPresented: Binding(
             get: { pushBranch != nil }, set: { if !$0 { pushBranch = nil } }
         ), titleVisibility: .visible, presenting: pushBranch) { branch in
             Button("Push") { performBranchAction(.push(branch)) }
@@ -199,20 +256,27 @@ struct RepositoryWorkspace: View {
         tagTarget = current.map(RevisionPoint.init) ?? RevisionPoint(commit: head)
     }
 
-    private var canPush: Bool { canMoveBranches && current != nil }
-
-    private var pushHelp: String {
-        if snapshot.repository.headID == nil { return "Create the first commit to push this branch" }
-        guard let current else { return "Check out a local branch to push" }
-        return current.upstreamID == nil ? "Publish this branch to a remote" : "Push local commits to the upstream branch"
+    private var toolbarPushBranch: RepositoryReference? {
+        if let ref = selectedReference, ref.kind == .local, tab.historySelection != .workInProgress { return ref }
+        return current
     }
 
-    private func requestPush() {
-        guard canPush, let current else { return }
-        if current.upstreamID == nil {
-            showActions(RevisionPoint(current), preferred: .publish)
+    private func pushHelp(for branch: RepositoryReference?) -> String {
+        if snapshot.repository.headID == nil && branch == nil { return "Create the first commit to push this branch" }
+        guard let branch else { return "Select a local branch to push" }
+        if let upstream = branch.pushUpstream { return "Push “" + branch.name + "” to " + upstream.displayName }
+        if snapshot.remotes.count == 1 { return "Publish “" + branch.name + "” to " + snapshot.remotes[0] }
+        return "Choose a remote to publish “" + branch.name + "”"
+    }
+
+    private func requestPush(_ branch: RepositoryReference) {
+        guard canMoveBranches, branch.kind == .local else { return }
+        if branch.pushUpstream != nil {
+            pushBranch = branch
+        } else if branch.upstreamID == nil, snapshot.remotes.count == 1, let remote = snapshot.remotes.first {
+            performBranchAction(.publish(branch, remote: remote))
         } else {
-            pushBranch = current
+            publishBranch = branch
         }
     }
 
@@ -249,6 +313,10 @@ struct RepositoryWorkspace: View {
         newBranchName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var branchNameTaken: Bool {
+        snapshot.references.contains { $0.kind == .local && $0.name == trimmedBranchName }
+    }
+
     private func nameBranch(_ draft: BranchDraft) {
         newBranchName = draft.suggestedName
         branchDraft = draft
@@ -270,14 +338,15 @@ struct RepositoryWorkspace: View {
     @ViewBuilder
     private var detail: some View {
         Group {
-            HistoryView(snapshot: snapshot, pendingCommitBatch: tab.pendingCommitBatch, resumeBatchReview: resumeBatchReview, selection: $tab.historySelection,
-                        jump: $tab.commitJump, worktreeFileCommit: tab.worktreeFileCommit, onCheckout: checkout, onDrop: proposeDrop, openBatch: { commitBatch = $0 }, openActions: { source, preferred in showActions(source, preferred: preferred) }, createTag: { tagTarget = $0 }, canAct: canMoveBranches, referenceMenu: referenceActions, deletionChoices: deletionChoices, requestDelete: { deleting = $0 },
+            HistoryView(snapshot: snapshot, selectedReference: selectedReference, pendingCommitBatch: tab.pendingCommitBatch, resumeBatchReview: resumeBatchReview, selection: $tab.historySelection,
+                        jump: $tab.commitJump, worktreeFileCommit: tab.worktreeFileCommit, onSelectReference: selectReference, onCheckout: checkout, onTrack: { nameBranch(.track($0)) }, onPush: requestPush, onDrop: proposeDrop, openBatch: { commitBatch = $0 }, openActions: { source, preferred in showActions(source, preferred: preferred) }, createTag: { tagTarget = $0 }, canAct: canMoveBranches, referenceMenu: referenceActions, deletionChoices: deletionChoices, requestDelete: { deleting = $0 },
                         showsDiff: tab.diff != nil, center: { if let diff = tab.diff { diffView(diff) } },
                         worktree: {
                             WorktreePanel(repository: snapshot.repository, branchColor: snapshot.colors.currentBranchColor,
-                                          draft: $tab.commitDraft, upstreamID: current?.upstreamID, remotes: snapshot.remotes,
+                                          draft: $tab.commitDraft, branch: current, remotes: snapshot.remotes,
                                           canCombine: canMoveBranches && (current != nil || snapshot.repository.headID == nil),
-                                          busy: !canChangeBranch, canPush: canPush, pushHelp: pushHelp, push: requestPush,
+                                          busy: !canChangeBranch, canPush: canMoveBranches && current != nil, pushHelp: pushHelp(for: current),
+                                          push: { if let current { requestPush(current) } },
                                           openChange: openWorkingTreeDiff,
                                           perform: { performBranchAction(.worktree($0)) })
                         }) { source, file in
@@ -317,8 +386,8 @@ struct RepositoryWorkspace: View {
 
     private var sidebar: some View {
         let query = tab.referenceFilter.trimmingCharacters(in: .whitespacesAndNewlines)
-        let matches = snapshot.references.filter {
-            query.isEmpty || $0.name.localizedStandardContains(query)
+        let matches = snapshot.referenceBadges.filter { badge in
+            query.isEmpty || badge.name.localizedStandardContains(query) || badge.references.contains { $0.name.localizedStandardContains(query) }
         }
 
         return VStack(spacing: 0) {
@@ -328,11 +397,13 @@ struct RepositoryWorkspace: View {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     navigationRow("All Commits", icon: "clock.arrow.circlepath", selection: .history)
                     navigationRow("Pull Requests", icon: "arrow.triangle.pull", selection: .pullRequests)
-                    ForEach(RepositoryReference.Kind.allCases, id: \.self) { kind in
-                        let references = matches.filter { $0.kind == kind }
-                        if !references.isEmpty || (kind == .tag && query.isEmpty) {
-                            referenceGroup(kind, references: references, isFiltering: !query.isEmpty)
-                        }
+                    let branches = matches.filter { $0.reference.kind != .tag }
+                    let tags = matches.filter { $0.reference.kind == .tag }
+                    if !branches.isEmpty {
+                        referenceGroup(.local, badges: branches, isFiltering: !query.isEmpty)
+                    }
+                    if !tags.isEmpty || query.isEmpty {
+                        referenceGroup(.tag, badges: tags, isFiltering: !query.isEmpty)
                     }
                     sidebarGroup("Worktrees", "externaldrive", count: snapshot.worktrees.count, expanded: sectionExpansion("worktrees")) {
                         ForEach(snapshot.worktrees) { item in
@@ -487,7 +558,7 @@ struct RepositoryWorkspace: View {
                 set: { tab.sidebarSections[key] = $0 })
     }
 
-    private func referenceGroup(_ kind: RepositoryReference.Kind, references: [RepositoryReference],
+    private func referenceGroup(_ kind: RepositoryReference.Kind, badges: [GraphReferenceBadge],
                                 isFiltering: Bool) -> some View {
         let saved = sectionExpansion(kind.prefix, defaultExpanded: true)
         let isExpanded = Binding {
@@ -499,69 +570,55 @@ struct RepositoryWorkspace: View {
                 else { collapsedSearchGroups.insert(kind) }
             }
         }
-        return sidebarGroup(kind == .local ? "Local" : kind == .remote ? "Remote" : "Tags",
-                            kind.icon, count: references.count, expanded: isExpanded, headerMenu: {
+        return sidebarGroup(kind == .tag ? "Tags" : "Branches",
+                            kind.icon, count: badges.count, expanded: isExpanded, headerMenu: {
             if kind == .tag {
                 Button("Create Tag…", systemImage: "tag", action: tagHead).disabled(!canTagHead)
             }
         }) {
-            ForEach(references) { reference in referenceLabel(reference) }
+            ForEach(badges) { badge in referenceLabel(badge) }
         }
     }
 
-    private func referenceLabel(_ reference: RepositoryReference) -> some View {
-        let isCurrent = reference.kind == .local && reference.name == snapshot.repository.branch
-        return HStack(spacing: 7) {
-            Label {
-                Text(reference.name)
-                    .foregroundStyle(snapshot.colors.color(for: reference))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            } icon: {
-                Image(systemName: reference.kind.icon)
-                    .foregroundStyle(snapshot.colors.color(for: reference))
-            }
+    private func referenceLabel(_ badge: GraphReferenceBadge) -> some View {
+        let ref = badge.reference
+        let isCurrent = snapshot.isCheckedOut(ref)
+        let selected = badge.references.contains { tab.selection == .reference($0.id) }
+        return HStack(spacing: 4) {
+            BranchLocationLabel(badge: badge, repository: tab.id, checkedOut: isCurrent,
+                                select: selectReference, checkout: checkout, drop: proposeDrop, menu: referenceActions)
             if isCurrent {
-                Spacer(minLength: 3)
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(snapshot.colors.currentBranchColor)
-                    .accessibilityLabel("Current branch")
+                Spacer(minLength: 2)
+                Text("Current")
+                    .font(.caption2.weight(.bold)).fixedSize()
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(snapshot.colors.currentBranchColor.opacity(0.16), in: Capsule())
             }
         }
+        .fontWeight(isCurrent ? .semibold : .regular)
+        .foregroundStyle(snapshot.colors.color(for: ref))
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-        .background(tab.selection == .reference(reference.id) ? WorkspaceColors.selection : .clear,
-                    in: RoundedRectangle(cornerRadius: 5))
-        .contentShape(Rectangle())
-        .onTapGesture { selectReference(reference) }
-        .accessibilityAddTraits(.isButton)
-        .contextMenu { referenceActions(reference) }
-        .modifier(BranchDragControl(reference: reference, repository: tab.id, onSelect: selectReference, onCheckout: checkout, onDrop: proposeDrop))
-        .help(reference.name + (isCurrent ? " (current branch)" : "") + " · Drag onto a branch or commit for actions")
+        .background {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(selected ? WorkspaceColors.selection : .clear)
+                .modifier(BranchDragControl(reference: ref, repository: tab.id, onSelect: selectReference, onCheckout: checkout, onDrop: proposeDrop))
+                .contextMenu { referenceActions(ref) }
+                .accessibilityHidden(true)
+        }
     }
 
     private func selectReference(_ reference: RepositoryReference) {
-        tab.selection = .reference(reference.id)
-        tab.diff = nil
-        tab.commitJump = CommitJump(commitID: reference.commitID)
+        tab.selectReference(reference)
     }
 
     private func checkout(_ reference: RepositoryReference) {
         guard canMoveBranches else { return }
-        switch reference.kind {
-        case .local:
-            if reference.name != snapshot.repository.branch {
-                performBranchAction(.switchTo(reference.name))
-            }
-        case .remote:
-            if let local = snapshot.references.first(where: { $0.upstreamID == reference.id }) {
-                checkout(local)
-            } else {
-                nameBranch(.track(reference))
-            }
-        case .tag:
-            break
+        if let local = snapshot.checkoutBranch(for: reference) {
+            if snapshot.isCheckedOut(local) { selectReference(local) }
+            else { performBranchAction(.switchTo(local.name)) }
+        } else if reference.kind == .remote {
+            nameBranch(.track(reference))
         }
     }
 
@@ -591,11 +648,20 @@ struct RepositoryWorkspace: View {
         return true
     }
 
+    private func showMerge(from source: RepositoryReference? = nil) {
+        guard canMoveBranches, snapshot.canMergeBranches(from: source) else { return }
+        mergeReview = BranchMergeReview(branches: snapshot.references, source: source, destination: current)
+    }
+
     private func showActions(_ source: RevisionPoint, target: RevisionPoint? = nil, preferred: RevisionOperation? = nil) {
         guard canMoveBranches else { return }
+        if preferred == .merge, target == nil, let reference = source.reference, reference.kind != .tag {
+            showMerge(from: reference)
+            return
+        }
         var targets = snapshot.references.map(RevisionPoint.init)
         if let target, !targets.contains(where: { $0.id == target.id }) { targets.insert(target, at: 0) }
-        let upstream = targets.first { $0.id == source.reference?.upstreamID }
+        let upstream = targets.first { $0.id == source.reference?.upstreamID && source.reference?.pushUpstream != nil }
         let prefersUpstream = preferred?.pushes == true || (preferred == nil && source.reference?.id == current?.id)
         guard let destination = target ?? (prefersUpstream ? upstream : nil)
                 ?? current.map(RevisionPoint.init) ?? targets.first(where: \.isLocal) ?? targets.first else { return }
@@ -604,6 +670,16 @@ struct RepositoryWorkspace: View {
 
     @ViewBuilder
     private func referenceActions(_ reference: RepositoryReference) -> some View {
+        if reference.kind == .local {
+            Button(reference.pushUpstream == nil ? "Publish Branch" : "Push Branch", systemImage: "arrow.up.to.line") {
+                requestPush(reference)
+            }.disabled(!canMoveBranches)
+        }
+        if reference.kind != .tag {
+            Button("Merge “" + reference.name + "” into…", systemImage: RevisionOperation.merge.icon) {
+                showMerge(from: reference)
+            }.disabled(!canMoveBranches || !snapshot.canMergeBranches(from: reference))
+        }
         Button("Branch Actions…", systemImage: "arrow.triangle.branch") { showActions(RevisionPoint(reference)) }
             .disabled(!canMoveBranches)
         if reference.kind == .local, let upstream = snapshot.references.first(where: { $0.id == reference.upstreamID }) {
@@ -625,37 +701,15 @@ struct RepositoryWorkspace: View {
             }.disabled(!canMoveBranches)
         }
         Divider()
-        switch reference.kind {
-        case .local:
-            Button(snapshot.otherWorktree(for: reference.name) == nil ? "Switch to Branch" : "Open Branch Worktree", systemImage: "arrow.triangle.branch") {
-                performBranchAction(.switchTo(reference.name))
-            }
-            .disabled(!canMoveBranches || reference.name == snapshot.repository.branch)
-        case .remote:
-            if let tracking = snapshot.references.first(where: { $0.upstreamID == reference.id }) {
-                Button("Switch to \(tracking.name)", systemImage: "arrow.triangle.branch") {
-                    performBranchAction(.switchTo(tracking.name))
-                }
-                .disabled(!canMoveBranches || tracking.name == snapshot.repository.branch)
-            } else {
-                Button("Create Tracking Branch…", systemImage: "arrow.triangle.branch") {
-                    nameBranch(.track(reference))
-                }
+        if let local = snapshot.checkoutBranch(for: reference) {
+            Button(snapshot.checkoutTitle(for: local), systemImage: "arrow.triangle.branch") { checkout(reference) }
+                .disabled(!canMoveBranches || snapshot.isCheckedOut(local))
+        } else if reference.kind == .remote {
+            Button("Create Tracking Branch…", systemImage: "arrow.triangle.branch") { checkout(reference) }
                 .disabled(!canMoveBranches)
-            }
-        case .tag:
-            EmptyView()
         }
 
-        if reference.kind != .tag,
-           let current = snapshot.references.first(where: {
-               $0.kind == .local && $0.name == snapshot.repository.branch
-           }),
-           current.id != reference.id {
-            Button("Merge into \(current.name)…", systemImage: "arrow.triangle.merge") {
-                showActions(RevisionPoint(reference), target: RevisionPoint(current), preferred: .merge)
-            }
-            .disabled(!canMoveBranches)
+        if reference.kind != .tag, let current, current.id != reference.id {
             Button("Rebase \(current.name) onto This Branch…", systemImage: "arrow.turn.up.right") {
                 showActions(RevisionPoint(current), target: RevisionPoint(reference), preferred: .rebase)
             }
@@ -790,7 +844,7 @@ private enum BranchDraft {
         switch self {
         case .create: ""
         case .track(let reference):
-            String(reference.name.split(separator: "/", maxSplits: 1).last ?? "")
+            reference.remoteTarget?.name ?? String(reference.name.split(separator: "/", maxSplits: 1).last ?? "")
         }
     }
 
@@ -809,12 +863,16 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
     }
 
     let snapshot: RepositorySnapshot
+    let selectedReference: RepositoryReference?
     let pendingCommitBatch: CommitBatch?
     let resumeBatchReview: () -> Void
     @Binding var selection: HistorySelection?
     @Binding var jump: CommitJump?
     let worktreeFileCommit: String?
+    let onSelectReference: (RepositoryReference) -> Void
     let onCheckout: (RepositoryReference) -> Void
+    let onTrack: (RepositoryReference) -> Void
+    let onPush: (RepositoryReference) -> Void
     let onDrop: (BranchDrag, RevisionPoint) -> Bool
     let openBatch: (CommitBatch) -> Void
     let openActions: (RevisionPoint, RevisionOperation?) -> Void
@@ -972,7 +1030,7 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
                     }
                 CommitTable(graph: graph, columns: columns, snapshot: snapshot, selection: $selection, jump: scrollRequest,
                             deletionChoices: deletionChoices, requestDelete: requestDelete, openActions: openActions, openBatch: openBatch, createTag: createTag, canAct: canAct, onDrop: onDrop, expandedBadges: expandedBadges) { references in
-                    BranchBadges(references: references, badge: referenceBadge, actions: referenceMenu)
+                    BranchBadges(groups: references, snapshot: snapshot, badge: referenceBadge, actions: referenceMenu)
                 }
                 if graph.rows.count == loadedMaximum {
                     Button(loadedMaximum == maximum ? "Load Older Commits" : "Loading Older Commits…") {
@@ -988,48 +1046,51 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
         .background(WorkspaceColors.history)
     }
 
-    private func expandedBadges(_ references: [RepositoryReference], width: CGFloat) -> AnyView {
-        let atHead = references.contains { $0.kind == .local && $0.name == snapshot.repository.branch }
+    private func locationLabel(_ badge: GraphReferenceBadge, wraps: Bool = false) -> some View {
+        BranchLocationLabel(badge: badge, repository: snapshot.repository.root, checkedOut: snapshot.isCheckedOut(badge.reference),
+                            wraps: wraps, select: onSelectReference, checkout: onCheckout, drop: onDrop, menu: referenceMenu)
+    }
+
+    private func expandedBadges(_ badges: [GraphReferenceBadge], width: CGFloat) -> AnyView {
+        let atHead = badges.contains { snapshot.isCheckedOut($0.reference) }
         let tint = atHead ? Color(red: 0.03, green: 0.55, blue: 0.66)
-                          : references.first.map { snapshot.colors.color(for: $0) } ?? WorkspaceColors.accent
+                          : badges.first.map { snapshot.colors.color(for: $0.reference) } ?? WorkspaceColors.accent
         return AnyView(LazyVStack(alignment: .leading, spacing: 0) {
-            ForEach(references) { ref in
-                let current = ref.kind == .local && ref.name == snapshot.repository.branch
-                let symbol = ref.kind == .local ? "laptopcomputer" : ref.kind.icon
+            ForEach(badges) { badge in
+                let ref = badge.reference
+                let current = snapshot.isCheckedOut(ref)
                 HStack(spacing: 5) {
-                    if current { Image(systemName: "checkmark").fontWeight(.bold) }
-                    Text(verbatim: ref.name)
-                        .fixedSize(horizontal: GraphReferencePreview.nameWidth(ref.name) + 48 <= width, vertical: true)
-                        .layoutPriority(1)
-                    Image(systemName: symbol).accessibilityHidden(true)
+                    locationLabel(badge, wraps: true)
+                    Spacer(minLength: 0)
+                    if ref.kind == .local && !current {
+                        Button(snapshot.otherWorktree(for: ref.name) == nil ? "Switch" : "Open") { onCheckout(ref) }
+                            .controlSize(.mini).fixedSize().disabled(!canAct)
+                            .accessibilityLabel(snapshot.checkoutTitle(for: ref)).help(snapshot.checkoutTitle(for: ref))
+                    }
                 }
-                .font(.system(size: 13, weight: current ? .semibold : .medium))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(current ? 1 : 0.87))
                 .padding(.horizontal, 6).frame(maxWidth: .infinity, minHeight: GraphReferencePreview.rowHeight, alignment: .leading)
-                .background(GraphReferenceRowBackground(referenceID: ref.id, tint: tint.opacity(current ? 0.64 : 0.27)))
-                .contentShape(Rectangle())
-                .modifier(BranchDragControl(reference: ref, repository: snapshot.repository.root,
-                                            onSelect: { selection = .commit($0.commitID) }, onCheckout: onCheckout, onDrop: onDrop))
-                .contextMenu { referenceMenu(ref) }
-                .accessibilityLabel(ref.name + ", " + ref.kind.rawValue)
+                .background {
+                    GraphReferenceRowBackground(badge: badge, tint: tint.opacity(current ? 0.64 : 0.27))
+                        .modifier(BranchDragControl(reference: ref, repository: snapshot.repository.root,
+                                                    onSelect: onSelectReference, onCheckout: onCheckout, onDrop: onDrop))
+                        .contextMenu { referenceMenu(ref) }
+                        .accessibilityHidden(true)
+                }
             }
         }.background(WorkspaceColors.history))
     }
 
-    private func referenceBadge(_ reference: RepositoryReference) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: reference.kind.icon).frame(width: 13)
-            Text(reference.name)
-        }
-            .lineLimit(1)
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(snapshot.colors.color(for: reference))
+    private func referenceBadge(_ badge: GraphReferenceBadge) -> some View {
+        let current = snapshot.isCheckedOut(badge.reference)
+        let color = snapshot.colors.color(for: badge.reference)
+        return locationLabel(badge)
+            .font(.system(size: 11, weight: current ? .semibold : .medium))
+            .foregroundStyle(current ? Color.white : color)
             .padding(.horizontal, 5)
-            .padding(.vertical, 2)
-            .background(snapshot.colors.color(for: reference).opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-            .modifier(BranchDragControl(reference: reference, repository: snapshot.repository.root, onSelect: { selection = .commit($0.commitID) }, onCheckout: onCheckout, onDrop: onDrop))
-            .contextMenu { referenceMenu(reference) }
-            .help(reference.name + " · Drag onto a branch or commit for actions")
+            .padding(.vertical, 1)
+            .background(current ? Color(red: 0.05, green: 0.24, blue: 0.49) : color.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
     }
 
     @ViewBuilder
@@ -1049,7 +1110,13 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
             }.padding(12).frame(maxHeight: .infinity, alignment: .top)
         } else if case .commit(let id) = selection, let index = graph.indexByID[id] {
             let commit = graph.rows[index].commit
-            CommitInspector(root: snapshot.repository.root, commit: commit, references: snapshot.references, showAll: worktreeFileCommit == id) { file in
+            let refs = snapshot.references.filter { $0.commitID == id }
+            CommitInspector(root: snapshot.repository.root, commit: commit, references: snapshot.references, showAll: worktreeFileCommit == id, branchInfo: {
+                if let ref = refs.first(where: { $0.id == selectedReference?.id }) ?? refs.first(where: snapshot.isCheckedOut) ?? refs.first {
+                    GraphBranchInspector(reference: ref, atCommit: refs, snapshot: snapshot, canAct: canAct,
+                                         select: onSelectReference, checkout: onCheckout, track: onTrack, push: onPush, merge: { openActions(RevisionPoint($0), .merge) })
+                }
+            }) { file in
                 viewDiff(file.unchanged ? .unchanged(commit) : .commit(commit), file)
             }
             .id(commit.id + (worktreeFileCommit == id ? "-all" : ""))
@@ -1059,10 +1126,11 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
     }
 }
 
-private struct CommitInspector: View {
+private struct CommitInspector<BranchInfo: View>: View {
     let root: URL
     let commit: GitCommit
     let references: [RepositoryReference]
+    @ViewBuilder let branchInfo: () -> BranchInfo
     let viewDiff: (CommitFile) -> Void
 
     @AppStorage(PreferenceKey.historyTree) private var tree = true
@@ -1073,10 +1141,12 @@ private struct CommitInspector: View {
     @State private var expanded: Set<String> = []
     @State private var error: String?
 
-    init(root: URL, commit: GitCommit, references: [RepositoryReference], showAll: Bool, viewDiff: @escaping (CommitFile) -> Void) {
+    init(root: URL, commit: GitCommit, references: [RepositoryReference], showAll: Bool,
+         @ViewBuilder branchInfo: @escaping () -> BranchInfo, viewDiff: @escaping (CommitFile) -> Void) {
         self.root = root
         self.commit = commit
         self.references = references
+        self.branchInfo = branchInfo
         self.viewDiff = viewDiff
         _all = State(initialValue: showAll)
     }
@@ -1092,6 +1162,7 @@ private struct CommitInspector: View {
             Divider()
             WorkspaceScrollView {
                 LazyVStack(alignment: .leading, spacing: 9) {
+                    branchInfo()
                     VStack(alignment: .leading, spacing: 6) {
                         Text(commit.subject).font(.headline)
                         if !commit.message.isEmpty { Text(commit.message).font(.callout) }
@@ -1361,38 +1432,43 @@ private struct CommitSearch: View {
 }
 
 private struct BranchBadges<Badge: View, Actions: View>: View {
-    let references: [RepositoryReference]
-    @ViewBuilder let badge: (RepositoryReference) -> Badge
+    let groups: [GraphReferenceBadge]
+    let snapshot: RepositorySnapshot
+    @ViewBuilder let badge: (GraphReferenceBadge) -> Badge
     @ViewBuilder let actions: (RepositoryReference) -> Actions
     @State private var pinnedID: String?
 
     var body: some View {
         GeometryReader { geo in
-            let ordered = references.first(where: { $0.id == pinnedID }).map { pinned in
-                [pinned] + references.filter { $0.id != pinned.id }
-            } ?? references
-            let widths = ordered.map { ref in
-                ceil((ref.name as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .medium)]).width) + 28
-            }
+            let ordered = pinnedID.flatMap { id in groups.first { $0.id == id } }.map { pinned in
+                [pinned] + groups.filter { $0.id != pinned.id }
+            } ?? groups
+            let widths = ordered.map { $0.width(checkedOut: snapshot.isCheckedOut($0.reference)) }
             let count = visibleCount(widths, available: geo.size.width)
             let hidden = ordered.dropFirst(count)
             HStack(spacing: 3) {
-                ForEach(Array(ordered.prefix(count).enumerated()), id: \.element.id) { index, ref in
-                    badge(ref).frame(maxWidth: widths[index], alignment: .leading)
+                ForEach(ordered.prefix(count)) { group in
+                    badge(group)
                 }
                 if !hidden.isEmpty {
                     Menu {
-                        ForEach(hidden) { ref in
-                            Menu(ref.name) {
-                                Button("Show Label in Graph") { pinnedID = ref.id }
+                        ForEach(hidden) { group in
+                            Menu(group.name) {
+                                Button("Show Label in Graph") { pinnedID = group.id }
                                 Divider()
-                                actions(ref)
+                                if group.references.count == 1 {
+                                    actions(group.reference)
+                                } else {
+                                    ForEach(group.references) { ref in
+                                        Menu(ref.locationLabel + " · " + ref.name) { actions(ref) }
+                                    }
+                                }
                             }
                         }
                     } label: { Text("+\(hidden.count)").font(.system(size: 10, weight: .semibold)) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden)
                     .fixedSize().layoutPriority(1)
-                    .accessibilityLabel("Show \(hidden.count) more references")
+                    .accessibilityLabel("Show \(hidden.count) more labels")
                     .help("Show other branches and tags at this commit")
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -1417,9 +1493,9 @@ private struct SelectorStyle: ViewModifier {
 
     func body(content: Content) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(caption.lowercased()).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(caption).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
             content.menuStyle(.borderlessButton).font(.callout.weight(.semibold))
-                .fixedSize().frame(maxWidth: 130, alignment: .leading).clipped()
+                .frame(maxWidth: 150, alignment: .leading)
         }.accessibilityLabel(caption + ", " + value)
     }
 }
