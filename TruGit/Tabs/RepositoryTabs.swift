@@ -18,11 +18,6 @@ struct SwitchStep {
     var action: GitBranchAction { .replaySwitch(from: from, expectedHead: head, to: to) }
 }
 
-enum BranchPushStatus: Equatable {
-    case pushing(String)
-    case completed(String)
-}
-
 @MainActor
 @Observable
 final class RepositoryTab: Identifiable {
@@ -36,7 +31,7 @@ final class RepositoryTab: Identifiable {
         }
     }
     var selection: RepositorySelection? = .history
-    var pushStatus: BranchPushStatus?
+    var pushingTo: String?
     var switchUndo: SwitchStep?
     var switchRedo: SwitchStep?
     var referenceFilter = ""

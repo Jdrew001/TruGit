@@ -18,6 +18,27 @@ struct RepositoryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(WorkspaceColors.history.ignoresSafeArea())
         .animation(launchAnimation ? .easeInOut(duration: reduceMotion ? 0.15 : 0.35) : nil, value: model.isLaunching)
+        .overlay(alignment: .topTrailing) {
+            if let success = model.success {
+                Label {
+                    Text(success.message).lineLimit(2)
+                } icon: {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                }
+                .font(.callout.weight(.medium))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .shadow(color: .black.opacity(0.15), radius: 5, y: 2)
+                .padding(12)
+                .allowsHitTesting(false)
+                .task(id: success.id) {
+                    AccessibilityNotification.Announcement(success.message).post()
+                    do { try await Task.sleep(for: .seconds(4)) } catch { return }
+                    if model.success?.id == success.id { model.success = nil }
+                }
+            }
+        }
         .onAppear {
             let duration = reduceMotion ? Duration.milliseconds(800) : LaunchSplash.displayTime
             model.restoreSession(minimumDisplayTime: launchAnimation ? duration : .zero)

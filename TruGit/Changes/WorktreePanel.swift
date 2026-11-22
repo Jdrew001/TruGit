@@ -37,6 +37,9 @@ struct WorktreePanel: View {
     @State private var previous: CommitMessage?
     @State private var previousID: String?
     @State private var previousError: String?
+    @State private var unstagedCollapsed = false
+    @State private var stagedCollapsed = false
+    @State private var unstagedFraction: CGFloat = 0.5
 
     private var available: Bool {
         !busy && repository.integration == nil && !repository.changes.contains { $0.staged == .conflict }
@@ -187,14 +190,7 @@ struct WorktreePanel: View {
                 Spacer(minLength: 2)
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
-            VSplitView {
-                FileSection(staged: false, files: unstaged, tree: tree, descending: descending,
-                            available: available, root: repository.root, openChange: openChange,
-                            discard: { discard = $0 }, perform: perform)
-                FileSection(staged: true, files: staged, tree: tree, descending: descending,
-                            available: available, root: repository.root, openChange: openChange,
-                            discard: { discard = $0 }, perform: perform)
-            }
+            fileLists(unstaged: unstaged, staged: staged)
             Divider()
             VStack(alignment: .leading, spacing: 6) {
                 Label("Commit", systemImage: "circle.dotted").font(.headline)
@@ -272,6 +268,44 @@ struct WorktreePanel: View {
             previousID = head
         }
     }
+    // Keep both lists in the zoomed SwiftUI coordinate space. VSplitView
+    // rehosts its children and offsets their mouse targets at non-default zoom.
+    private func fileLists(unstaged: [FileChange], staged: [FileChange]) -> some View {
+        GeometryReader { geometry in
+            let canResize = !unstagedCollapsed && !stagedCollapsed
+            let dividerHeight: CGFloat = 6
+            let height = max(0, geometry.size.height - dividerHeight)
+            let minimum = min(46, height / 2)
+            let firstHeight = min(height - minimum, max(minimum, height * unstagedFraction))
+            VStack(spacing: 0) {
+                FileSection(staged: false, files: unstaged, tree: tree, descending: descending,
+                            available: available, root: repository.root, openChange: openChange,
+                            discard: { discard = $0 }, perform: perform, collapsed: $unstagedCollapsed)
+                    .frame(height: canResize ? firstHeight : nil)
+                if canResize {
+                    Divider()
+                        .frame(height: dividerHeight)
+                        .contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("worktreeFileLists"))
+                            .onChanged { drag in
+                                guard height > 0 else { return }
+                                let y = drag.location.y - dividerHeight / 2
+                                unstagedFraction = min(height - minimum, max(minimum, y)) / height
+                            })
+                        .accessibilityLabel("Resize file lists")
+                        .accessibilityAdjustableAction { direction in
+                            unstagedFraction = min(1, max(0, unstagedFraction + (direction == .increment ? 0.1 : -0.1)))
+                        }
+                }
+                FileSection(staged: true, files: staged, tree: tree, descending: descending,
+                            available: available, root: repository.root, openChange: openChange,
+                            discard: { discard = $0 }, perform: perform, collapsed: $stagedCollapsed)
+            }
+            .coordinateSpace(name: "worktreeFileLists")
+        }
+        .frame(minHeight: unstagedCollapsed && stagedCollapsed ? 56 : 80)
+    }
+
 }
 
 
@@ -342,7 +376,7 @@ private struct FileSection: View {
     let openChange: (FileChange, DiffRequest.Source?) -> Void
     let discard: ([FileChange]) -> Void
     let perform: (WorktreeAction) -> Void
-    @State private var collapsed = false
+    @Binding var collapsed: Bool
     @State private var expanded: Set<String> = []
 
     private func status(_ file: FileChange) -> FileChange.Status {
@@ -412,7 +446,7 @@ private struct FileSection: View {
     }
 
     private func fileRow(_ row: FileHierarchy<FileChange>.Row) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 0) {
             Button {
                 if let file = row.file {
                     openChange(file, staged ? .staged : .workingTree(status(file)))
@@ -435,17 +469,19 @@ private struct FileSection: View {
                             }.foregroundStyle(statusColor(state)).help(state.rawValue)
                         }
                     }
-                }.contentShape(Rectangle())
+                }
+                .frame(minHeight: 22)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain).help(row.path)
             Button { changeIndex(row.files) } label: {
                 Image(systemName: staged ? "minus.circle" : "plus.circle")
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain).foregroundStyle(staged ? Color.orange : .mint)
             .accessibilityLabel("\(verb) \(row.path)").help("\(verb) \(row.path)").disabled(!available)
         }
-        .frame(minHeight: 22)
-        .contentShape(Rectangle())
         .contextMenu {
             if let file = row.file {
                 Button("Open Diff") { openChange(file, staged ? .staged : .workingTree(status(file))) }

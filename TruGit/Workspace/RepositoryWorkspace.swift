@@ -45,24 +45,14 @@ struct RepositoryWorkspace: View {
                 }
             } else {
                 commandBar
-                if let status = tab.pushStatus {
+                if let destination = tab.pushingTo {
                     HStack(spacing: 7) {
-                        switch status {
-                        case .pushing(let destination):
-                            ProgressView().controlSize(.small)
-                            Text("Pushing to " + destination + "…")
-                        case .completed(let destination):
-                            Label("Push complete · " + destination, systemImage: "checkmark.circle.fill")
-                        }
+                        ProgressView().controlSize(.small)
+                        Text("Pushing to " + destination + "…")
                         Spacer()
                     }
                     .font(.callout).padding(.horizontal, 12).padding(.vertical, 5)
                     .background(WorkspaceColors.panel)
-                    .task(id: status) {
-                        guard case .completed = status else { return }
-                        try? await Task.sleep(for: .seconds(8))
-                        if !Task.isCancelled, tab.pushStatus == status { tab.pushStatus = nil }
-                    }
                 }
                 if let integration = snapshot.repository.integration {
                     IntegrationBar(integration: integration, operation: snapshot.operationTitle, hasConflicts: hasConflicts,

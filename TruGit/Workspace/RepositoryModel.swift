@@ -99,6 +99,12 @@ final class RepositoryModel {
     private(set) var tabs: [RepositoryTab] = []
     private(set) var activeID: URL?
     private(set) var isLoading = false
+    struct Success: Identifiable {
+        let id = UUID()
+        let message: String
+    }
+
+    var success: Success?
     var failure: Failure?
     struct InitializationReview: Identifiable {
         let id = UUID()
@@ -180,9 +186,11 @@ final class RepositoryModel {
         guard !isLoading else { throw RepositoryReadError.commandFailed("Wait for the current Git operation to finish.") }
         isLoading = true
         defer { isLoading = false }
+        success = nil
         let destination = try await request.run()
         do {
             showRepository(try await Self.readSnapshot(at: destination))
+            success = Success(message: "Cloned " + destination.lastPathComponent)
         } catch {
             throw RepositoryReadError.commandFailed("Cloned to " + destination.path + " but couldn’t open the repository. " + error.localizedDescription)
         }
@@ -241,6 +249,7 @@ final class RepositoryModel {
         initialization = nil
         let requests = review.folders.filter { selected.contains($0.folder) }
         guard !requests.isEmpty else { return }
+        success = nil
         isLoading = true
         Task {
             defer { isLoading = false }
@@ -255,6 +264,10 @@ final class RepositoryModel {
                 }
             }
             openRepositoryTabs(opened)
+            if let first = opened.first {
+                success = Success(message: opened.count == 1 ? "Initialized " + first.repository.root.lastPathComponent
+                                  : "Initialized \(opened.count) repositories")
+            }
             reportFolderErrors(errors, title: "Couldn’t Initialize Selected Folders")
         }
     }
@@ -334,7 +347,12 @@ final class RepositoryModel {
 
     func refresh() {
         guard let tab = activeTab else { return }
-        load(tab.id) { snapshot in tab.snapshot = snapshot }
+        guard !isLoading else { return }
+        success = nil
+        load(tab.id) { snapshot in
+            tab.snapshot = snapshot
+            self.success = Success(message: "Refreshed " + tab.id.lastPathComponent)
+        }
     }
 
     func observeActiveRepository() async {
@@ -386,6 +404,7 @@ final class RepositoryModel {
         guard !isLoading else { return }
         isLoading = true
 
+        success = nil
         retryingFailureID = failureID
         Task {
             defer {
@@ -404,6 +423,7 @@ final class RepositoryModel {
                     default: checkoutOnly = false
                     }
                     if checkoutOnly {
+                        success = Success(message: "Opened worktree for " + owner.repository.branch)
                         if owner.repository.integration == nil, tab.pendingCommitBatch == nil, let branch = owner.checkedOutBranch {
                             tab.selectReference(branch)
                         }
@@ -417,10 +437,10 @@ final class RepositoryModel {
                 return
             }
             let before = tab.snapshot.repository
-            let destination = action.pushDestination
-            if let destination { tab.pushStatus = .pushing(destination) }
+            tab.pushingTo = action.pushDestination
             let actionError = await runBranchAction(action, in: tab.id)
-            if let destination { tab.pushStatus = actionError == nil ? .completed(destination) : nil }
+            if actionError == nil { success = Success(message: action.successMessage) }
+            tab.pushingTo = nil
             let pushFailure = actionError as? CommitPushFailure
             let failureTitle = pushFailure == nil ? action.failureTitle : "Committed locally · Push failed"
             let retry = pushFailure?.push.flatMap { RemoteRetry($0, in: tab.id, pinPush: true) }

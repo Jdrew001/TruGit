@@ -70,6 +70,33 @@ enum GitBranchAction: Sendable {
     case continueIntegration(GitIntegration)
     case abortIntegration(GitIntegration)
 
+    var successMessage: String {
+        switch self {
+        case .pushTag(let tag, let remote): "Pushed tag “\(tag.name)” to \(remote)"
+        case .fetch: "Fetch succeeded"
+        case .revision(let action): action.operation.rawValue + " succeeded"
+        case .skipIntegration: "Skipped commit"
+        case .pull(let branch): "Pulled changes into \(branch.name)"
+        case .push(let branch): "Pushed " + (pushDestination ?? branch.name)
+        case .publish(let branch, let remote, _): "Published \(branch.name) to \(remote)"
+        case .stash: "Stash succeeded"
+        case .stashEntry(.apply, _): "Applied stash"
+        case .stashEntry(.pop, _): "Popped stash"
+        case .stashEntry(.delete, _): "Deleted stash"
+        case .switchTo(let name), .replaySwitch(_, _, let name): "Switched to \(name)"
+        case .createAndSwitch(let name, _), .track(let name, _): "Created branch “\(name)”"
+        case .deleteBranch: "Deleted branch"
+        case .resolve: "Staged conflict resolution"
+        case .continueIntegration(let integration): "Continued " + integration.rawValue
+        case .abortIntegration(let integration): "Aborted " + integration.rawValue
+        case .worktree(.stage): "Staged changes"
+        case .worktree(.unstage): "Unstaged changes"
+        case .worktree(.discardUnstaged): "Discarded changes"
+        case .worktree(.commit(_, _, .some)): "Committed and pushed changes"
+        case .worktree(.commit): "Commit succeeded"
+        }
+    }
+
     var failureTitle: String {
         switch self {
         case .pushTag: "Couldn’t push tag"
