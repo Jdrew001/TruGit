@@ -91,6 +91,9 @@ struct PullActivity: Decodable, Identifiable, Sendable {
 
 struct PullFile: Decodable, Identifiable, Sendable {
     let filename: String
+    let sha: String
+    let status: String
+    let previousFilename: String?
     let additions: Int
     let deletions: Int
     let patch: String?

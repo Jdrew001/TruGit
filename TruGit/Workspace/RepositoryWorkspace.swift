@@ -1260,7 +1260,7 @@ private struct CommitInspector<BranchInfo: View>: View {
     }
 }
 
-private struct WidthDivider: NSViewRepresentable {
+struct WidthDivider: NSViewRepresentable {
     let label: String
     let width: CGFloat
     let limits: ClosedRange<CGFloat>

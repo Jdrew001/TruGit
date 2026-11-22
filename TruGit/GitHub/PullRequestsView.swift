@@ -75,7 +75,7 @@ struct PullRequestsView: View {
     private struct Discovery: Equatable { let remotes: [String]; let attempt: Int }
 }
 
-private struct PullBrowser: View {
+struct PullBrowser: View {
     let api: GitHubAPI
     let login: String
     let repo: GitHubRepository
@@ -92,19 +92,28 @@ private struct PullBrowser: View {
     @State private var revision = 0
     @State private var creating = false
     @State private var preferred: Int?
+    @State private var inboxWidth: CGFloat = 274
 
     var body: some View {
-        HSplitView {
-            if showsInbox || selected == nil {
-                inbox.frame(minWidth: 220, idealWidth: 274, maxWidth: 350)
-            }
-            if let selected {
-                PullDetailView(api: api, repo: repo, number: selected, login: login, refresh: revision)
-                    .id(selected)
-            } else {
-                ContentUnavailableView("Select a pull request", systemImage: "text.bubble",
-                                       description: Text("Its conversation and changed files will appear here."))
-                    .frame(maxWidth: .infinity)
+        GeometryReader { geometry in
+            let maximum = max(220, min(350, geometry.size.width - 238))
+            let width = min(inboxWidth, maximum)
+            HStack(spacing: 0) {
+                if showsInbox || selected == nil {
+                    inbox.frame(width: width)
+                    WidthDivider(label: "Pull request inbox width", width: width, limits: 220...maximum) { proposed, _ in
+                        inboxWidth = proposed
+                    }
+                    .frame(width: 8)
+                }
+                if let selected {
+                    PullDetailView(api: api, repo: repo, number: selected, login: login, refresh: revision)
+                        .id(selected)
+                } else {
+                    ContentUnavailableView("Select a pull request", systemImage: "text.bubble",
+                                           description: Text("Its conversation and changed files will appear here."))
+                        .frame(maxWidth: .infinity)
+                }
             }
         }
         .onChange(of: filter) { page = 1; rows = []; more = false; selected = nil }

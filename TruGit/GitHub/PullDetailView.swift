@@ -8,8 +8,8 @@ struct PullDetailView: View {
     let refresh: Int
     @State private var pull: GitHubPull?
     @State private var activity: [PullActivity] = []
-    @State private var files: [PullFile] = []
-    @State private var showFiles = false
+    @State private var files: [ReviewFile] = []
+    @State private var showFiles = true
     @State private var message = ""
     @State private var reviewTarget: GitHubPull?
     @State private var replyTo: PullActivity?
@@ -43,7 +43,7 @@ struct PullDetailView: View {
                         detailTab("Conversation", icon: "bubble.left.and.bubble.right", fileTab: false)
                         detailTab("Files changed", icon: "doc.text", fileTab: true)
                         Spacer()
-                        Button { reviewTarget = pull } label: { Label("Review changes", systemImage: "checkmark.bubble") }
+                        Button { reviewTarget = pull } label: { Label("Submit review…", systemImage: "checkmark.bubble") }
                             .buttonStyle(PullPrimaryButton())
                             .disabled(pull.state != "open" || loading || sending || error != nil)
                     }.padding(.top, 5)
@@ -58,30 +58,33 @@ struct PullDetailView: View {
                 }.padding(8)
             }
             if loading { ProgressView().controlSize(.small).padding(8) }
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    if showFiles {
-                        if !files.isEmpty {
-                            Text("\(files.count) changed " + (files.count == 1 ? "file" : "files")).font(.headline)
+            if showFiles {
+                if !files.isEmpty {
+                    PersonalFileReview(files: files, login: login, repository: repo.id, number: number)
+                        .disabled(loading || error != nil)
+                } else if !loading && error == nil {
+                    ContentUnavailableView("No changed files", systemImage: "doc")
+                }
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        if let pull {
+                            if let body = pull.body, !body.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Description").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                    PullMessage(body)
+                                }.padding(14).frame(maxWidth: .infinity, alignment: .leading).pullCard()
+                            }
+                            let threads = Dictionary(grouping: activity.filter { $0.inReplyToId != nil }, by: \.inReplyToId)
+                            let roots = Set(activity.filter { $0.path != nil && $0.inReplyToId == nil }.map(\.id))
+                            ForEach(activity.filter { $0.inReplyToId.map { !roots.contains($0) } ?? true }, id: \.key) { entry in
+                                PullActivityCard(entry: entry, replies: entry.path == nil ? [] : threads[entry.id] ?? [],
+                                                 canReply: !sending, reply: { replyTo = $0 })
+                            }
+                            if activity.isEmpty && !loading && error == nil { Text("No comments or reviews yet").foregroundStyle(.secondary) }
                         }
-                        ForEach(files) { file in FilePatch(file: file, initiallyExpanded: file.id == files.first?.id) }
-                        if files.isEmpty && !loading && error == nil { Text("No changed files").foregroundStyle(.secondary) }
-                    } else if let pull {
-                        if let body = pull.body, !body.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Description").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                                PullMessage(body)
-                            }.padding(14).frame(maxWidth: .infinity, alignment: .leading).pullCard()
-                        }
-                        let threads = Dictionary(grouping: activity.filter { $0.inReplyToId != nil }, by: \.inReplyToId)
-                        let roots = Set(activity.filter { $0.path != nil && $0.inReplyToId == nil }.map(\.id))
-                        ForEach(activity.filter { $0.inReplyToId.map { !roots.contains($0) } ?? true }, id: \.key) { entry in
-                            PullActivityCard(entry: entry, replies: entry.path == nil ? [] : threads[entry.id] ?? [],
-                                             canReply: !sending, reply: { replyTo = $0 })
-                        }
-                        if activity.isEmpty && !loading && error == nil { Text("No comments or reviews yet").foregroundStyle(.secondary) }
-                    }
-                }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                    }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             if !showFiles && pull != nil {
                 Divider()
@@ -117,7 +120,7 @@ struct PullDetailView: View {
                 if showFiles {
                     let loaded = try await api.files(repo, number)
                     try Task.checkCancellation()
-                    files = loaded
+                    files = loaded.map(ReviewFile.init)
                 } else {
                     let loaded = try await api.activity(repo, number)
                     try Task.checkCancellation()
@@ -218,32 +221,6 @@ private struct PullActivityCard: View {
                 if entry.path != nil { Button("Reply") { reply(entry) }.buttonStyle(.link).font(.caption).disabled(!canReply) }
             }.padding(12).frame(maxWidth: .infinity, alignment: .leading).pullCard()
         }
-    }
-}
-
-private struct FilePatch: View {
-    let file: PullFile
-    @State private var expanded: Bool
-
-    init(file: PullFile, initiallyExpanded: Bool) {
-        self.file = file
-        _expanded = State(initialValue: initiallyExpanded)
-    }
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            if expanded {
-                if let patch = file.patch { PatchText(text: patch) }
-                else { Text("GitHub did not provide a text patch for this file.").font(.caption).foregroundStyle(.secondary) }
-            }
-        } label: {
-            HStack {
-                Text(file.filename).lineLimit(2).truncationMode(.middle)
-                Spacer()
-                Text("+\(file.additions)").foregroundStyle(.green)
-                Text("−\(file.deletions)").foregroundStyle(.red)
-            }.font(.caption.monospaced())
-        }.padding(12).pullCard()
     }
 }
 
