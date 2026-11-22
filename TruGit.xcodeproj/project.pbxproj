@@ -57,6 +57,66 @@
 		B0000000000000000000AF69 /* PersonalFileReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000AF05 /* PersonalFileReview.swift */; };
 		7481719DCDA748C4A3916582 /* PatchText.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAFBF0E1C2424A9CBFA10FD2 /* PatchText.swift */; };
 		B0000000000000000000006A /* PullRequestsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000006 /* PullRequestsView.swift */; };
+		B9A9EB050576EE4C0CFD055E /* PullRequest.json in Resources */ = {
+			isa = PBXBuildFile;
+			fileRef = 4CE4C228DC0500D466678381 /* PullRequest.json */;
+		};
+		225745CA825D89DCA68AD8D5 /* PersonalReviewTests.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = B43982B428E027C8330A2EBF /* PersonalReviewTests.swift */;
+		};
+		A6B9C39E5B00C7406297B93E /* PushTests.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = D0DC2208277886FD9406456F /* PushTests.swift */;
+		};
+		FA1A131A0F8F36864838EC91 /* GitHubFixtureProtocol.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = BF43BFFB1DFAEAD98B05F909 /* GitHubFixtureProtocol.swift */;
+		};
+		EE3603BE07951A81E29BB755 /* RepositoryFixture.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = F2005C49E0B27465AC46CEB8 /* RepositoryFixture.swift */;
+		};
+		C31BE52760C8656CF4C11B3B /* TruGitUITestCase.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = E0C33C9A40DD8351534EE3EA /* TruGitUITestCase.swift */;
+		};
+		4691625760A90F69911C60A3 /* WorktreeTests.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = 60B5C631A7395386528FA33E /* WorktreeTests.swift */;
+		};
+		824CADE84A8C43B8C82F9D8E /* BranchTests.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = 13D886512B27FA312D69C5A8 /* BranchTests.swift */;
+		};
+		8808DF9715E9067921EC974F /* ConflictTests.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = C14C59F1D703215ACB18A58B /* ConflictTests.swift */;
+		};
+		DC7C05CFBC02FC4791F27741 /* WorkspaceTests.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = 1CCBFE99E307ABCBD10C6DE2 /* WorkspaceTests.swift */;
+		};
+		3DDD3D41128EEFF361DDB47A /* RevisionTests.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = 37E7111F2C644F43E5F785A6 /* RevisionTests.swift */;
+		};
+		0473021316E94E15F38396A0 /* HostedReviewTests.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = 65A5E86CA7418D7EF3CAF848 /* HostedReviewTests.swift */;
+		};
+		20363E69C455095E415DE1BF /* RepositoryLifecycleTests.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = C3CC456F40DCB7A3A106E0CD /* RepositoryLifecycleTests.swift */;
+		};
+		3958F4844D84127782BE8371 /* ZoomLayoutTests.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = 72ED7B0D6E6DCBD4C89098C6 /* ZoomLayoutTests.swift */;
+		};
+		E8D59113FED3018A9694A6DA /* HistoryTests.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = 8473FCA4E8C1C0D5621D4FC2 /* HistoryTests.swift */;
+		};
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -111,12 +171,112 @@
 		B0000000000000000000AF05 /* PersonalFileReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalFileReview.swift; sourceTree = "<group>"; };
 		CAFBF0E1C2424A9CBFA10FD2 /* PatchText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatchText.swift; sourceTree = "<group>"; };
 		B00000000000000000000006 /* PullRequestsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PullRequestsView.swift; sourceTree = "<group>"; };
+		4CE4C228DC0500D466678381 /* PullRequest.json */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.json;
+			path = PullRequest.json;
+			sourceTree = "<group>";
+		};
+		B43982B428E027C8330A2EBF /* PersonalReviewTests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = PersonalReviewTests.swift;
+			sourceTree = "<group>";
+		};
+		D0DC2208277886FD9406456F /* PushTests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = PushTests.swift;
+			sourceTree = "<group>";
+		};
+		BF43BFFB1DFAEAD98B05F909 /* GitHubFixtureProtocol.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = GitHubFixtureProtocol.swift;
+			sourceTree = "<group>";
+		};
+		F2005C49E0B27465AC46CEB8 /* RepositoryFixture.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = RepositoryFixture.swift;
+			sourceTree = "<group>";
+		};
+		E0C33C9A40DD8351534EE3EA /* TruGitUITestCase.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = TruGitUITestCase.swift;
+			sourceTree = "<group>";
+		};
+		60B5C631A7395386528FA33E /* WorktreeTests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = WorktreeTests.swift;
+			sourceTree = "<group>";
+		};
+		678751391088C7F4066CFFB8 /* TruGitUITests.xctest */ = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.cfbundle;
+			includeInIndex = 0;
+			path = TruGitUITests.xctest;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		B2217DA4E879F3EAA92BC6B5 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		E3D4B95C0EF3C6F5BC241C72 /* TestInfo.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = TestInfo.plist; sourceTree = "<group>"; };
+		13D886512B27FA312D69C5A8 /* BranchTests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = BranchTests.swift;
+			sourceTree = "<group>";
+		};
+		C14C59F1D703215ACB18A58B /* ConflictTests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = ConflictTests.swift;
+			sourceTree = "<group>";
+		};
+		1CCBFE99E307ABCBD10C6DE2 /* WorkspaceTests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = WorkspaceTests.swift;
+			sourceTree = "<group>";
+		};
+		37E7111F2C644F43E5F785A6 /* RevisionTests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = RevisionTests.swift;
+			sourceTree = "<group>";
+		};
+		65A5E86CA7418D7EF3CAF848 /* HostedReviewTests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = HostedReviewTests.swift;
+			sourceTree = "<group>";
+		};
+		C3CC456F40DCB7A3A106E0CD /* RepositoryLifecycleTests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = RepositoryLifecycleTests.swift;
+			sourceTree = "<group>";
+		};
+		72ED7B0D6E6DCBD4C89098C6 /* ZoomLayoutTests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = ZoomLayoutTests.swift;
+			sourceTree = "<group>";
+		};
+		8473FCA4E8C1C0D5621D4FC2 /* HistoryTests.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = HistoryTests.swift;
+			sourceTree = "<group>";
+		};
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
 		A10000000000000000000004 = {
 			isa = PBXGroup;
 			children = (
+				68036F3BD7D944B75CB30F13 /* E2E */,
 				A10000000000000000000005 /* TruGit */,
 				A10000000000000000000006 /* Products */,
 			);
@@ -141,7 +301,7 @@
 		};
 		A10000000000000000000006 /* Products */ = {
 			isa = PBXGroup;
-			children = (A10000000000000000000003 /* TruGit.app */);
+			children = (A10000000000000000000003 /* TruGit.app */, 678751391088C7F4066CFFB8 /* TruGitUITests.xctest */);
 			name = Products;
 			sourceTree = "<group>";
 		};
@@ -249,6 +409,102 @@
 			path = GitHub;
 			sourceTree = "<group>";
 		};
+		42322FCE079BC5361BDAB3D8 /* Fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				4CE4C228DC0500D466678381 /* PullRequest.json */,
+			);
+			path = Fixtures;
+			sourceTree = "<group>";
+		};
+		CD3B41091BE916BA9C4DFE6B /* PullRequests */ = {
+			isa = PBXGroup;
+			children = (
+				65A5E86CA7418D7EF3CAF848 /* HostedReviewTests.swift */,
+				B43982B428E027C8330A2EBF /* PersonalReviewTests.swift */,
+			);
+			path = PullRequests;
+			sourceTree = "<group>";
+		};
+		74FAE17940DBDE60B0A49C36 /* Remotes */ = {
+			isa = PBXGroup;
+			children = (
+				D0DC2208277886FD9406456F /* PushTests.swift */,
+			);
+			path = Remotes;
+			sourceTree = "<group>";
+		};
+		A87EFC97221532DC983782CA /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				E3D4B95C0EF3C6F5BC241C72 /* TestInfo.plist */,
+				BF43BFFB1DFAEAD98B05F909 /* GitHubFixtureProtocol.swift */,
+				F2005C49E0B27465AC46CEB8 /* RepositoryFixture.swift */,
+				E0C33C9A40DD8351534EE3EA /* TruGitUITestCase.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		407E0878CDFCFDA37A9CA733 /* Worktree */ = {
+			isa = PBXGroup;
+			children = (
+				60B5C631A7395386528FA33E /* WorktreeTests.swift */,
+			);
+			path = Worktree;
+			sourceTree = "<group>";
+		};
+		68036F3BD7D944B75CB30F13 /* E2E */ = {
+			isa = PBXGroup;
+			children = (
+				E2ABF1E774CA0D9C97D54F57 /* History */,
+				04D4E637F83C383FB1969FAD /* Workspace */,
+				5639FB50EEDFAC674179B256 /* Conflicts */,
+				115C3E1FB7EE847ADE848237 /* Branches */,
+				B2217DA4E879F3EAA92BC6B5 /* README.md */,
+				42322FCE079BC5361BDAB3D8 /* Fixtures */,
+				CD3B41091BE916BA9C4DFE6B /* PullRequests */,
+				74FAE17940DBDE60B0A49C36 /* Remotes */,
+				A87EFC97221532DC983782CA /* Support */,
+				407E0878CDFCFDA37A9CA733 /* Worktree */,
+			);
+			path = Tests/E2E;
+			sourceTree = "<group>";
+		};
+		115C3E1FB7EE847ADE848237 /* Branches */ = {
+			isa = PBXGroup;
+			children = (
+				37E7111F2C644F43E5F785A6 /* RevisionTests.swift */,
+				13D886512B27FA312D69C5A8 /* BranchTests.swift */,
+			);
+			path = Branches;
+			sourceTree = "<group>";
+		};
+		5639FB50EEDFAC674179B256 /* Conflicts */ = {
+			isa = PBXGroup;
+			children = (
+				C14C59F1D703215ACB18A58B /* ConflictTests.swift */,
+			);
+			path = Conflicts;
+			sourceTree = "<group>";
+		};
+		04D4E637F83C383FB1969FAD /* Workspace */ = {
+			isa = PBXGroup;
+			children = (
+				72ED7B0D6E6DCBD4C89098C6 /* ZoomLayoutTests.swift */,
+				C3CC456F40DCB7A3A106E0CD /* RepositoryLifecycleTests.swift */,
+				1CCBFE99E307ABCBD10C6DE2 /* WorkspaceTests.swift */,
+			);
+			path = Workspace;
+			sourceTree = "<group>";
+		};
+		E2ABF1E774CA0D9C97D54F57 /* History */ = {
+			isa = PBXGroup;
+			children = (
+				8473FCA4E8C1C0D5621D4FC2 /* HistoryTests.swift */,
+			);
+			path = History;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -276,6 +532,24 @@
         };
 /* End XCSwiftPackageProductDependency section */
 
+/* Begin PBXContainerItemProxy section */
+		E93ED6B8D4104F73291F63B6 /* App target proxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000008 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000007;
+			remoteInfo = TruGit;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		E0B6C6DB0C57F10552EAACC2 /* Test host */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000007 /* TruGit */;
+			targetProxy = E93ED6B8D4104F73291F63B6 /* App target proxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin PBXNativeTarget section */
 		A10000000000000000000007 /* TruGit */ = {
 			isa = PBXNativeTarget;
@@ -288,6 +562,20 @@
 			productName = TruGit;
 			productReference = A10000000000000000000003 /* TruGit.app */;
 			productType = "com.apple.product-type.application";
+		};
+		CFF8A7AD4C0A06E0357099EF /* TruGitUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2B97959FFB10D36209A31790 /* UI test configurations */;
+			buildPhases = (
+				6779B4788E69168D2C10F9D0 /* TruGitUITests Sources */,
+				41DBFFE51FFCF66AFD299F1B /* TruGitUITests Resources */,
+			);
+			buildRules = ();
+			dependencies = (E0B6C6DB0C57F10552EAACC2 /* Test host */);
+			name = TruGitUITests;
+			productName = TruGitUITests;
+			productReference = 678751391088C7F4066CFFB8 /* TruGitUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
@@ -305,7 +593,7 @@
 			productRefGroup = A10000000000000000000006 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (A10000000000000000000007 /* TruGit */);
+			targets = (A10000000000000000000007 /* TruGit */, CFF8A7AD4C0A06E0357099EF /* TruGitUITests */);
 		};
 /* End PBXProject section */
 
@@ -316,6 +604,14 @@
 			files = (A00000000000000000000140 /* Assets.xcassets in Resources */, BA11C4000000000000000007 /* Octicons-LICENSE.txt in Resources */);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		41DBFFE51FFCF66AFD299F1B /* TruGitUITests Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B9A9EB050576EE4C0CFD055E /* PullRequest.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -323,6 +619,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FA1A131A0F8F36864838EC91 /* GitHubFixtureProtocol.swift in Sources */,
 				B0000000000000000000006A /* PullRequestsView.swift in Sources */,
 				B00000000000000000000069 /* PullDetailView.swift in Sources */,
 				B0000000000000000000AF69 /* PersonalFileReview.swift in Sources */,
@@ -374,6 +671,26 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		6779B4788E69168D2C10F9D0 /* TruGitUITests Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E8D59113FED3018A9694A6DA /* HistoryTests.swift in Sources */,
+				3958F4844D84127782BE8371 /* ZoomLayoutTests.swift in Sources */,
+				20363E69C455095E415DE1BF /* RepositoryLifecycleTests.swift in Sources */,
+				0473021316E94E15F38396A0 /* HostedReviewTests.swift in Sources */,
+				3DDD3D41128EEFF361DDB47A /* RevisionTests.swift in Sources */,
+				DC7C05CFBC02FC4791F27741 /* WorkspaceTests.swift in Sources */,
+				8808DF9715E9067921EC974F /* ConflictTests.swift in Sources */,
+				824CADE84A8C43B8C82F9D8E /* BranchTests.swift in Sources */,
+				225745CA825D89DCA68AD8D5 /* PersonalReviewTests.swift in Sources */,
+				A6B9C39E5B00C7406297B93E /* PushTests.swift in Sources */,
+				EE3603BE07951A81E29BB755 /* RepositoryFixture.swift in Sources */,
+				C31BE52760C8656CF4C11B3B /* TruGitUITestCase.swift in Sources */,
+				4691625760A90F69911C60A3 /* WorktreeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
@@ -390,6 +707,20 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
+		};
+		922D0559E2F12C66A12E5625 /* E2E Project */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG TRUGIT_E2E";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = E2E;
 		};
 		A1000000000000000000000D /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -420,6 +751,23 @@
 			};
 			name = Debug;
 		};
+		39EDA7E1692425800044112F /* E2E App */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				GENERATE_INFOPLIST_FILE = YES;
+                INFOPLIST_FILE = Release/UpdateInfo.plist;
+                LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.drewatkison.TruGit.E2E;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+			};
+			name = E2E;
+		};
 		A1000000000000000000000F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -437,6 +785,45 @@
 			};
 			name = Release;
 		};
+		F8E49BE1DB78838D9824659B /* TruGitUITests Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Tests/E2E/Support/TestInfo.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = com.drewatkison.TruGit.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = TruGit;
+			};
+			name = Debug;
+		};
+		048ED8E7122D25C79D3FF607 /* TruGitUITests Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Tests/E2E/Support/TestInfo.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = com.drewatkison.TruGit.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = TruGit;
+			};
+			name = Release;
+		};
+		C2DB46895C302901066FA797 /* TruGitUITests E2E */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Tests/E2E/Support/TestInfo.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = com.drewatkison.TruGit.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = TruGit;
+			};
+			name = E2E;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -444,6 +831,7 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A1000000000000000000000E /* Debug */,
+				39EDA7E1692425800044112F /* E2E App */,
 				A1000000000000000000000F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
@@ -453,10 +841,21 @@
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A1000000000000000000000C /* Debug */,
+				922D0559E2F12C66A12E5625 /* E2E Project */,
 				A1000000000000000000000D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
+		};
+		2B97959FFB10D36209A31790 /* UI test configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F8E49BE1DB78838D9824659B /* TruGitUITests Debug */,
+				048ED8E7122D25C79D3FF607 /* TruGitUITests Release */,
+				C2DB46895C302901066FA797 /* TruGitUITests E2E */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = E2E;
 		};
 /* End XCConfigurationList section */
 	};

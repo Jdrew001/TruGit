@@ -1,0 +1,104 @@
+{
+  "pull": {
+    "number": 42,
+    "title": "Review navigation",
+    "state": "open",
+    "draft": false,
+    "head": {
+      "label": "example:feature",
+      "sha": "abc123"
+    },
+    "base": {
+      "label": "example:main",
+      "sha": "def456"
+    },
+    "user": {
+      "login": "author"
+    },
+    "body": "Fixture PR description."
+  },
+  "files": [
+    {
+      "filename": "Sources/Alpha.swift",
+      "status": "added",
+      "sha": "aaa",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1 @@\n+struct Alpha {}"
+    },
+    {
+      "filename": "Sources/Bravo.swift",
+      "status": "added",
+      "sha": "bbb",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1 @@\n+struct Bravo {}"
+    },
+    {
+      "filename": "Sources/Charlie.swift",
+      "status": "added",
+      "sha": "ccc",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1 @@\n+struct Charlie {}"
+    }
+  ],
+  "routes": {
+    "/repos/example/review": {
+      "default_branch": "main"
+    },
+    "/repos/example/review/branches": [
+      {
+        "name": "main"
+      },
+      {
+        "name": "topic"
+      }
+    ],
+    "/repos/example/review/issues/42/comments": [
+      {
+        "id": 1,
+        "body": "First comment",
+        "user": {
+          "login": "author"
+        }
+      }
+    ],
+    "/repos/example/review/pulls/42/reviews": [],
+    "/repos/example/review/pulls/42/comments": [
+      {
+        "id": 3,
+        "body": "Check this line",
+        "path": "Sources/Alpha.swift",
+        "line": 1,
+        "diff_hunk": "+struct Alpha {}",
+        "user": {
+          "login": "author"
+        }
+      }
+    ]
+  },
+  "writes": {
+    "/repos/example/review/issues/42/comments": {},
+    "/repos/example/review/pulls/42/reviews": {},
+    "/repos/example/review/pulls/42/comments/3/replies": {},
+    "/repos/example/review/pulls": {
+      "number": 42,
+      "title": "Review navigation",
+      "state": "open",
+      "draft": false,
+      "head": {
+        "label": "example:feature",
+        "sha": "abc123"
+      },
+      "base": {
+        "label": "example:main",
+        "sha": "def456"
+      },
+      "user": {
+        "login": "author"
+      },
+      "body": "Fixture PR description."
+    }
+  }
+}

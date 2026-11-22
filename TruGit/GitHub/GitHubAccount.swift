@@ -58,6 +58,11 @@ final class GitHubAccount {
     func restore() async {
         guard !restored, !busy else { return }
         restored = true
+        #if TRUGIT_E2E
+        client = GitHubFixtureProtocol.api()
+        login = ProcessInfo.processInfo.environment["TRUGIT_FIXTURE_LOGIN"] ?? "reviewer"
+        return
+        #else
         busy = true
         defer { busy = false }
         do {
@@ -67,6 +72,7 @@ final class GitHubAccount {
         } catch {
             if Task.isCancelled { restored = false } else { self.error = error.localizedDescription }
         }
+        #endif
     }
 
     func connect(_ token: String) async {

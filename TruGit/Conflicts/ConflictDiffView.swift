@@ -14,6 +14,7 @@ struct ConflictDiffView: View {
     @State private var stale = false
     @State private var fileChoice: ConflictChoice?
     @State private var failure: String?
+    @State private var hunkPaneFraction: CGFloat = 0.5
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,18 +53,7 @@ struct ConflictDiffView: View {
             }
             if let document {
                 if let text = document.text, !text.hunks.isEmpty {
-                    VSplitView {
-                        WorkspaceScrollView {
-                            LazyVStack(alignment: .leading, spacing: 12) {
-                                ForEach(text.hunks) { hunk in
-                                    block(hunk) { choice in draft?.choose(choice, for: hunk) }
-                                }
-                            }
-                            .padding(12)
-                        }
-                        .frame(minHeight: 98)
-                        editor.frame(minHeight: 100)
-                    }
+                    conflictPanes(text)
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Choose the version to stage").font(.headline)
@@ -108,6 +98,41 @@ struct ConflictDiffView: View {
                 if draft?.hasManualEdits == true { stale = true; return }
                 document = nil
             }
+        }
+    }
+
+    private func conflictPanes(_ text: ConflictText) -> some View {
+        GeometryReader { geometry in
+            let dividerHeight: CGFloat = 6
+            let height = max(0, geometry.size.height - dividerHeight)
+            let minimum = min(100, height / 2)
+            let topHeight = min(height - minimum, max(minimum, height * hunkPaneFraction))
+            VStack(spacing: 0) {
+                WorkspaceScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(text.hunks) { hunk in
+                            block(hunk) { choice in draft?.choose(choice, for: hunk) }
+                        }
+                    }
+                    .padding(12)
+                }
+                .frame(height: topHeight)
+                Divider()
+                    .frame(height: dividerHeight)
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("conflictPanes"))
+                        .onChanged { drag in
+                            guard height > 0 else { return }
+                            let y = drag.location.y - dividerHeight / 2
+                            hunkPaneFraction = min(height - minimum, max(minimum, y)) / height
+                        })
+                    .accessibilityLabel("Resize conflict panes")
+                    .accessibilityAdjustableAction { direction in
+                        hunkPaneFraction = min(1, max(0, hunkPaneFraction + (direction == .increment ? 0.1 : -0.1)))
+                    }
+                editor
+            }
+            .coordinateSpace(name: "conflictPanes")
         }
     }
 

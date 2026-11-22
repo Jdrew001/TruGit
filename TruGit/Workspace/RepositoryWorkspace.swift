@@ -1261,6 +1261,7 @@ private struct CommitInspector<BranchInfo: View>: View {
 }
 
 struct WidthDivider: NSViewRepresentable {
+    @Environment(\.appZoom) private var zoom
     let label: String
     let width: CGFloat
     let limits: ClosedRange<CGFloat>
@@ -1270,6 +1271,7 @@ struct WidthDivider: NSViewRepresentable {
     func makeNSView(context: Context) -> Handle { Handle() }
 
     func updateNSView(_ handle: Handle, context: Context) {
+        handle.zoomScale = zoom.wrappedValue.scale
         handle.width = width
         handle.limits = limits
         handle.growsLeft = growsLeft
@@ -1280,6 +1282,7 @@ struct WidthDivider: NSViewRepresentable {
     }
 
     final class Handle: NSView {
+        var zoomScale: CGFloat = 1
         var width: CGFloat = 294
         var limits: ClosedRange<CGFloat> = 0...294
         var growsLeft = false
@@ -1318,7 +1321,7 @@ struct WidthDivider: NSViewRepresentable {
         override func mouseUp(with event: NSEvent) { move(event, finished: true) }
 
         private func move(_ event: NSEvent, finished: Bool) {
-            let delta = event.locationInWindow.x - startX
+            let delta = (event.locationInWindow.x - startX) / zoomScale
             resize?(min(limits.upperBound, max(limits.lowerBound, startWidth + (growsLeft ? -delta : delta))), finished)
         }
 
@@ -1376,6 +1379,7 @@ func formatPath(_ path: String, original: String?) -> String {
     return original.map { "\(escaped($0)) → \(destination)" } ?? destination
 }
 private struct CommitSearch: View {
+    private let resultRowHeight: CGFloat = 26
     let root: URL
     let select: (GitCommit) -> Void
     @State private var query = ""
@@ -1390,18 +1394,22 @@ private struct CommitSearch: View {
             if !status.isEmpty { Text(status).foregroundStyle(.secondary) }
             if !results.isEmpty {
                 WorkspaceScrollView {
-                    LazyVStack(alignment: .leading) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(results) { commit in
                             Button { select(commit) } label: {
                                 HStack {
                                     Text(commit.shortID).font(.caption.monospaced()).foregroundStyle(.secondary)
                                     Text(commit.subject).lineLimit(1)
                                     Spacer()
-                                }.contentShape(Rectangle())
-                            }.buttonStyle(.plain).help(commit.subject)
+                                }.frame(height: resultRowHeight).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(commit.subject)
+                            .accessibilityValue(commit.shortID)
+                            .help(commit.subject)
                         }
                     }
-                }.frame(maxHeight: 250)
+                }.frame(height: min(250, CGFloat(results.count) * resultRowHeight))
             }
         }.padding(12).frame(width: 360)
         .task(id: query) {

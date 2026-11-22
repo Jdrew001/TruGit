@@ -164,6 +164,7 @@ struct MergeEditor: NSViewRepresentable {
         weak var view: NSTextView?
         var updating = false
         var revision: UUID?
+        private var pendingHighlight: NSRange?
 
         init(_ parent: MergeEditor) {
             self.parent = parent
@@ -195,7 +196,16 @@ struct MergeEditor: NSViewRepresentable {
             parent = MergeEditor(draft: draft, path: parent.path, enabled: parent.enabled, edited: parent.edited)
             parent.edited(draft)
             (view as? NumberedCodeView)?.invalidateLines()
-            color((storage.string as NSString).lineRange(for: range))
+            // TextKit updates its temporary-attribute ranges after this callback.
+            // Wait until the text view finishes the edit before changing them.
+            let text = storage.string as NSString
+            pendingHighlight = pendingHighlight == nil ? text.lineRange(for: range) : NSRange(location: 0, length: text.length)
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let range = pendingHighlight else { return }
+            pendingHighlight = nil
+            color(range)
         }
 
         func color(_ range: NSRange) {
