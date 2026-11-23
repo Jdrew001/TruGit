@@ -19,34 +19,57 @@ struct BranchColors: Sendable {
     private let currentBranchIndex: Int?
     var currentBranchColor: Color { currentBranchIndex.map { Color(nsColor: Self.native($0)) } ?? .secondary }
 
-    // Alternate hue families so nearby graph lanes have distinct accents on a dark surface.
-    private static let palette: [NSColor] = [
+    private static let currentBranchAccent = 4
+
+    // Sidebar labels and graph strokes use the same hue families at different intensities.
+    private static let palette = colors([
         0x27E5FF, 0xB687FF, 0x24E4BE, 0xFF70CF,
         0x60AAFF, 0xE696FF, 0x8AF9FA, 0x9399FF
-    ].map { (rgb: Int) in
-        NSColor(srgbRed: CGFloat(rgb >> 16) / 255,
-                green: CGFloat((rgb >> 8) & 255) / 255,
-                blue: CGFloat(rgb & 255) / 255, alpha: 1)
+    ])
+    private static let graphPalette = colors([
+        0x18B1D1, 0xA655F4, 0x18B69A, 0xE745AE,
+        0x3387FF, 0xC56FEA, 0x61C6D7, 0x7588F2
+    ])
+
+    private static func colors(_ values: [Int]) -> [NSColor] {
+        values.map { rgb in
+            NSColor(srgbRed: CGFloat(rgb >> 16) / 255,
+                    green: CGFloat((rgb >> 8) & 255) / 255,
+                    blue: CGFloat(rgb & 255) / 255, alpha: 1)
+        }
     }
 
     init(references: [RepositoryReference], currentBranch: String) {
         let branches = references.filter { $0.kind != .tag }.sorted { $0.id < $1.id }
-        var used = Set<Int>()
+        let currentID = RepositoryReference.Kind.local.prefix + currentBranch
+        var used: Set<Int> = branches.contains(where: { $0.id == currentID }) ? [Self.currentBranchAccent] : []
         for branch in branches {
-            let hash = branch.id.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
-            var index = Int(hash) % Self.palette.count
-            if used.count < Self.palette.count {
-                while used.contains(index) { index = (index + 1) % Self.palette.count }
-            } else {
-                index = used.count
-            }
+            let index = branch.id == currentID ? Self.currentBranchAccent : Self.availableColor(for: branch.id, used: used)
             used.insert(index)
             byReference[branch.id] = index
-            if byTip[branch.commitID] == nil || (branch.kind == .local && branch.name == currentBranch) {
+            if byTip[branch.commitID] == nil || branch.id == currentID {
                 byTip[branch.commitID] = index
             }
         }
-        currentBranchIndex = byReference[RepositoryReference.Kind.local.prefix + currentBranch]
+        currentBranchIndex = byReference[currentID]
+    }
+
+    private static func availableColor(for ref: String, used: Set<Int>) -> Int {
+        guard used.count < palette.count else { return used.count }
+        let hash = ref.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
+        var index = Int(hash) % palette.count
+        while used.contains(index) { index = (index + 1) % palette.count }
+        return index
+    }
+
+    static func graph(_ index: Int) -> NSColor {
+        if index < graphPalette.count { return graphPalette[index] }
+        let color = native(index)
+        return color.blended(withFraction: 0.20, of: .black) ?? color
+    }
+
+    func graphColor(for reference: RepositoryReference) -> Color {
+        byReference[reference.id].map { Color(nsColor: Self.graph($0)) } ?? .orange
     }
 
     static func native(_ index: Int) -> NSColor {

@@ -1088,8 +1088,9 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
                         }.frame(width: 8).offset(x: columns.refs - 4)
                     }
                 CommitTable(graph: graph, columns: columns, snapshot: snapshot, selection: $selection, jump: scrollRequest,
-                            deletionChoices: deletionChoices, requestDelete: requestDelete, checkout: onCheckout, openActions: openActions, openBatch: openBatch, createTag: createTag, canAct: canAct, onDrop: onDrop, expandedBadges: expandedBadges) { references in
-                    BranchBadges(groups: references, snapshot: snapshot, badge: referenceBadge, actions: referenceMenu)
+                            deletionChoices: deletionChoices, requestDelete: requestDelete, checkout: onCheckout, openActions: openActions, openBatch: openBatch, createTag: createTag, canAct: canAct, onDrop: onDrop, expandedBadges: expandedBadges) { references, colorIndex in
+                    BranchBadges(groups: references, snapshot: snapshot, tint: Color(nsColor: BranchColors.graph(colorIndex)),
+                                 badge: referenceBadge, actions: referenceMenu)
                 }
                 if graph.rows.count == loadedMaximum {
                     Button(loadedMaximum == maximum ? "Load Older Commits" : "Loading Older Commits…") {
@@ -1142,13 +1143,13 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
 
     private func referenceBadge(_ badge: GraphReferenceBadge) -> some View {
         let current = snapshot.isCheckedOut(badge.reference)
-        let color = snapshot.colors.color(for: badge.reference)
+        let color = snapshot.colors.graphColor(for: badge.reference)
         return locationLabel(badge)
             .font(.system(size: 11, weight: current ? .semibold : .medium))
-            .foregroundStyle(current ? Color.white : color)
+            .foregroundStyle(Color.white.opacity(current ? 1 : 0.88))
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(current ? Color(red: 0.05, green: 0.24, blue: 0.49) : color.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
+            .background(color.opacity(current ? 0.36 : 0.22), in: RoundedRectangle(cornerRadius: 4))
     }
 
     @ViewBuilder
@@ -1500,6 +1501,7 @@ private struct CommitSearch: View {
 private struct BranchBadges<Badge: View, Actions: View>: View {
     let groups: [GraphReferenceBadge]
     let snapshot: RepositorySnapshot
+    let tint: Color
     @ViewBuilder let badge: (GraphReferenceBadge) -> Badge
     @ViewBuilder let actions: (RepositoryReference) -> Actions
     @State private var pinnedID: String?
@@ -1512,33 +1514,42 @@ private struct BranchBadges<Badge: View, Actions: View>: View {
             let widths = ordered.map { $0.width(checkedOut: snapshot.isCheckedOut($0.reference)) }
             let count = visibleCount(widths, available: geo.size.width)
             let hidden = ordered.dropFirst(count)
-            HStack(spacing: 3) {
-                ForEach(ordered.prefix(count)) { group in
-                    badge(group)
+            HStack(spacing: 0) {
+                HStack(spacing: 3) {
+                    ForEach(ordered.prefix(count)) { group in badge(group) }
+                    if !hidden.isEmpty { overflow(hidden) }
                 }
-                if !hidden.isEmpty {
-                    Menu {
-                        ForEach(hidden) { group in
-                            Menu(group.name) {
-                                Button("Show Label in Graph") { pinnedID = group.id }
-                                Divider()
-                                if group.references.count == 1 {
-                                    actions(group.reference)
-                                } else {
-                                    ForEach(group.references) { ref in
-                                        Menu(ref.locationLabel + " · " + ref.name) { actions(ref) }
-                                    }
-                                }
-                            }
-                        }
-                    } label: { Text("+\(hidden.count)").font(.system(size: 10, weight: .semibold)) }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden)
-                    .fixedSize().layoutPriority(1)
-                    .accessibilityLabel("Show \(hidden.count) more labels")
-                    .help("Show other branches and tags at this commit")
-                }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .layoutPriority(1)
+                Rectangle().fill(tint.opacity(0.32)).frame(height: 1)
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
+    }
+
+    private func overflow(_ hidden: ArraySlice<GraphReferenceBadge>) -> some View {
+        Menu {
+            ForEach(hidden) { group in
+                Menu(group.name) {
+                    Button("Show Label in Graph") { pinnedID = group.id }
+                    Divider()
+                    if group.references.count == 1 {
+                        actions(group.reference)
+                    } else {
+                        ForEach(group.references) { ref in
+                            Menu(ref.locationLabel + " · " + ref.name) { actions(ref) }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Text("+\(hidden.count)").font(.system(size: 10, weight: .semibold))
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+        .fixedSize().layoutPriority(1)
+        .accessibilityLabel("Show \(hidden.count) more labels")
+        .help("Show other branches and tags at this commit")
     }
 
     private func visibleCount(_ widths: [CGFloat], available: CGFloat) -> Int {

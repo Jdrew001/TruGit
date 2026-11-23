@@ -2,21 +2,28 @@ import AppKit
 import SwiftUI
 
 private enum HistoryGraphStroke {
-    static let laneInset: CGFloat = 13
-    static let width: CGFloat = 1.65
+    static let laneInset: CGFloat = 14
+    static let laneSpacing: CGFloat = 25
+    static let width: CGFloat = 2
     static let dash: [CGFloat] = [2, 3]
     static let workingTree = NSColor.systemTeal.withAlphaComponent(0.86)
 
-    static func addConnection(from start: CGPoint, to end: CGPoint, in cg: CGContext) {
+    static func addConnection(from start: CGPoint, to end: CGPoint, joining: Bool, in cg: CGContext) {
         cg.move(to: start)
         guard start.x != end.x else {
             cg.addLine(to: end)
             return
         }
-        // Vertical tangents meet the neighboring rows without a kink at the lane boundary.
-        let handle = (end.y - start.y) * 0.32
-        cg.addCurve(to: end, control1: CGPoint(x: start.x, y: start.y + handle),
-                   control2: CGPoint(x: end.x, y: end.y - handle))
+        let radius = min(8, abs(end.x - start.x) * 0.65, (end.y - start.y) * 0.65)
+        if joining {
+            // Meet the destination's continuous stroke just above the row boundary.
+            let join = CGPoint(x: end.x, y: end.y - 2)
+            cg.addArc(tangent1End: CGPoint(x: start.x, y: join.y), tangent2End: join, radius: radius)
+            cg.addLine(to: join)
+        } else {
+            cg.addArc(tangent1End: CGPoint(x: end.x, y: start.y), tangent2End: end, radius: radius)
+            cg.addLine(to: end)
+        }
     }
 }
 
@@ -30,7 +37,8 @@ struct HistoryColumns: Equatable {
 
     init(width: CGFloat, lanes: Int, preferredRefs: CGFloat) {
         let automatic = min(216, max(72, width * 0.24))
-        graph = min(width * 0.25, max(min(254, width * 0.12), min(254, CGFloat(lanes) * 23 + 15)))
+        let lanesWidth = HistoryGraphStroke.laneInset * 2 + CGFloat(max(0, lanes - 1)) * HistoryGraphStroke.laneSpacing
+        graph = min(width * 0.25, max(min(254, width * 0.12), min(254, lanesWidth)))
         refLimits = 54...max(54, width - graph - min(160, width * 0.35))
         refs = min(refLimits.upperBound, max(refLimits.lowerBound, preferredRefs > 0 ? preferredRefs : automatic))
         let available = width - max(0, refs - automatic)
@@ -76,7 +84,7 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
     let canAct: Bool
     let onDrop: (BranchDrag, RevisionPoint) -> Bool
     let expandedBadges: ([GraphReferenceBadge]) -> AnyView
-    @ViewBuilder let badges: ([GraphReferenceBadge]) -> Badges
+    @ViewBuilder let badges: ([GraphReferenceBadge], Int) -> Badges
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -229,7 +237,7 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
             let item = graph.rows[row - commitOffset]
             let badges = badgesByCommit[item.id] ?? []
             cell.configure(item, columns: parent.columns, lanes: graph.laneCount, head: item.id == parent.snapshot.repository.headID,
-                           badges: badges.isEmpty ? nil : AnyView(parent.badges(badges).id(item.id)))
+                           badges: badges.isEmpty ? nil : AnyView(parent.badges(badges, item.color).id(item.id)))
             return cell
         }
 
@@ -548,6 +556,7 @@ private final class CommitCell: NSTableCellView {
     private var row: CommitGraph.Row?
     private var lanes = 1
     private var head = false
+    private var initials = ""
     override var isFlipped: Bool { true }
 
     override init(frame: CGRect) {
@@ -572,6 +581,7 @@ private final class CommitCell: NSTableCellView {
         self.row = row
         self.lanes = lanes
         self.head = head
+        initials = row.commit.authorInitials
         if row.commit.parents.count > 1 {
             let label = NSMutableAttributedString(string: "⑂ Merge  ", attributes: [.foregroundColor: NSColor.systemMint])
             label.append(NSAttributedString(string: row.commit.mergeRoute ?? row.commit.subject))
@@ -619,7 +629,9 @@ private final class CommitCell: NSTableCellView {
     }
 
     private var graphStep: CGFloat {
-        min(23, max(0, columns.graph - HistoryGraphStroke.laneInset * 2) / CGFloat(max(1, lanes - 1)))
+        let space = max(0, columns.graph - HistoryGraphStroke.laneInset * 2)
+        if lanes == 1 { return min(HistoryGraphStroke.laneSpacing, columns.graph) }
+        return min(HistoryGraphStroke.laneSpacing, space / CGFloat(lanes - 1))
     }
 
     private func graphX(lane: Int) -> CGFloat {
@@ -636,11 +648,9 @@ private final class CommitCell: NSTableCellView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let row, let cg = NSGraphicsContext.current?.cgContext else { return }
-        func point(_ lane: Int, _ height: Double) -> CGPoint {
-            CGPoint(x: graphX(lane: lane), y: bounds.height * height)
-        }
-        let center = point(row.column, 0.5)
-        let scale = min(1, max(0.35, graphStep / 14))
+        let center = CGPoint(x: graphX(lane: row.column), y: bounds.midY)
+        let tint = BranchColors.graph(row.color)
+        let scale = min(1, max(0.35, graphStep / 12))
         let strokeWidth = HistoryGraphStroke.width * max(0.62, scale)
 
         cg.saveGState()
@@ -648,49 +658,93 @@ private final class CommitCell: NSTableCellView {
         cg.setShouldAntialias(true)
         cg.setLineJoin(.round)
         cg.setLineWidth(strokeWidth)
-        for segment in row.segments {
-            let start = point(segment.fromLane, segment.fromHeight)
-            let end = point(segment.toLane, segment.toHeight)
-            let color = segment.isWorkingTree ? HistoryGraphStroke.workingTree
-                : BranchColors.native(segment.color).withAlphaComponent(0.78)
-            cg.setLineCap(segment.isWorkingTree ? .round : .butt)
-            cg.setLineDash(phase: 0, lengths: segment.isWorkingTree ? HistoryGraphStroke.dash : [])
-            cg.setStrokeColor(color.cgColor)
-            HistoryGraphStroke.addConnection(from: start, to: end, in: cg)
-            cg.strokePath()
-        }
-
-        drawNode(row, at: center, scale: scale, strokeWidth: strokeWidth, in: cg)
+        drawRowTint(tint, from: center, in: cg)
+        drawLanes(of: row, in: cg)
+        drawNode(at: center, tint: tint, isMerge: row.commit.parents.count > 1, scale: scale, in: cg)
     }
 
-    private func drawNode(_ row: CommitGraph.Row, at center: CGPoint, scale: CGFloat, strokeWidth: CGFloat, in cg: CGContext) {
-        let tint = BranchColors.native(row.color).cgColor
+    private func drawRowTint(_ tint: NSColor, from center: CGPoint, in cg: CGContext) {
+        cg.setFillColor(tint.withAlphaComponent(0.085).cgColor)
+        cg.fill(CGRect(x: center.x, y: 3, width: max(0, bounds.maxX - center.x), height: bounds.height - 6))
+        if let host {
+            cg.setFillColor(tint.withAlphaComponent(0.32).cgColor)
+            cg.fill(CGRect(x: host.frame.maxX, y: center.y - 0.5, width: max(0, center.x - host.frame.maxX), height: 1))
+        }
+    }
+
+    private func drawLanes(of row: CommitGraph.Row, in cg: CGContext) {
+        let turns = row.segments.filter { $0.fromLane != $0.toLane }.sorted {
+            abs($0.toLane - $0.fromLane) > abs($1.toLane - $1.fromLane)
+        }
+        if !turns.isEmpty {
+            let throughLanes = Set(row.segments.lazy.filter { $0.fromHeight == 0 && $0.toHeight == 1 }.map(\.fromLane))
+            for turn in turns {
+                let joining = throughLanes.contains(turn.toLane)
+                drawSegment(turn, colorIndex: joining ? row.color : turn.color, joining: joining, in: cg)
+            }
+        }
+        // Paint continuous lanes over crossings so they still read as uninterrupted tracks.
+        for segment in row.segments where segment.fromLane == segment.toLane {
+            drawSegment(segment, colorIndex: segment.color, joining: false, in: cg)
+        }
+    }
+
+    private func drawSegment(_ segment: CommitGraph.Segment, colorIndex: Int, joining: Bool, in cg: CGContext) {
+        let start = CGPoint(x: graphX(lane: segment.fromLane), y: bounds.height * segment.fromHeight)
+        let end = CGPoint(x: graphX(lane: segment.toLane), y: bounds.height * segment.toHeight)
+        let color = segment.isWorkingTree ? HistoryGraphStroke.workingTree
+            : BranchColors.graph(colorIndex).withAlphaComponent(0.94)
+        cg.setLineCap(segment.isWorkingTree ? .round : .butt)
+        cg.setLineDash(phase: 0, lengths: segment.isWorkingTree ? HistoryGraphStroke.dash : [])
+        cg.setStrokeColor(color.cgColor)
+        HistoryGraphStroke.addConnection(from: start, to: end, joining: joining, in: cg)
+        cg.strokePath()
+    }
+
+    private func drawNode(at center: CGPoint, tint: NSColor, isMerge: Bool, scale: CGFloat, in cg: CGContext) {
+        let showsInitials = !isMerge && !initials.isEmpty && graphStep >= 19
+        let radius = showsInitials ? min(11.5, (graphStep - 3) / 2) : (isMerge ? 5.5 : 4.5) * scale
+        let dot = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
         let surface = NSColor(WorkspaceColors.history).cgColor
-        let dot = CGRect(x: center.x - 4 * scale, y: center.y - 4 * scale, width: 8 * scale, height: 8 * scale)
         cg.setLineDash(phase: 0, lengths: [])
         if head {
-            let ring = dot.insetBy(dx: -3.5 * scale, dy: -3.5 * scale)
+            let ring = dot.insetBy(dx: -2 * scale, dy: -2 * scale)
             cg.setFillColor(surface)
             cg.fillEllipse(in: ring)
-            cg.setStrokeColor(tint)
-            cg.setLineWidth(1.4 * max(0.62, scale))
+            cg.setStrokeColor(tint.cgColor)
+            cg.setLineWidth(max(0.75, scale))
             cg.strokeEllipse(in: ring)
         }
-        if row.commit.parents.count > 1 {
-            let radius = 5.25 * scale
+        if isMerge {
             cg.move(to: CGPoint(x: center.x, y: center.y - radius))
             cg.addLine(to: CGPoint(x: center.x + radius, y: center.y))
             cg.addLine(to: CGPoint(x: center.x, y: center.y + radius))
             cg.addLine(to: CGPoint(x: center.x - radius, y: center.y))
             cg.closePath()
-            cg.setFillColor(surface)
-            cg.setStrokeColor(tint)
-            cg.setLineWidth(strokeWidth)
-            cg.drawPath(using: .fillStroke)
+            cg.setFillColor(tint.cgColor)
+            cg.fillPath()
         } else {
-            cg.setFillColor(tint)
+            let fill = showsInitials ? tint.blended(withFraction: 0.42, of: .black) ?? tint : tint
+            cg.setFillColor(fill.cgColor)
             cg.fillEllipse(in: dot)
         }
+        if showsInitials { drawInitials(at: center, radius: radius) }
+    }
+
+    private func drawInitials(at center: CGPoint, radius: CGFloat) {
+        let label = initials as NSString
+        let pointSize = min(10.5, radius)
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: pointSize, weight: .bold),
+            .foregroundColor: NSColor.white
+        ]
+        let availableWidth = radius * 2 - 3
+        let labelWidth = label.size(withAttributes: attributes).width
+        if labelWidth > availableWidth {
+            attributes[.font] = NSFont.systemFont(ofSize: pointSize * availableWidth / labelWidth, weight: .bold)
+        }
+        let size = label.size(withAttributes: attributes)
+        label.draw(at: CGPoint(x: center.x - size.width / 2, y: center.y - size.height / 2), withAttributes: attributes)
     }
 }
 
