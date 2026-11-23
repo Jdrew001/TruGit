@@ -44,11 +44,18 @@ struct PullAvatar: View {
 }
 
 struct PullStatus: View {
-    let pull: GitHubPull
+    let status: PullRequestStatus
+
     var body: some View {
-        let color = pull.mergedAt != nil ? PullStyle.violet : pull.state == "closed" ? PullStyle.amber : pull.draft == true ? .secondary : PullStyle.mint
-        Text(pull.status).font(.caption.weight(.semibold)).foregroundStyle(color)
+        let color: Color = switch status {
+        case .open: PullStyle.mint
+        case .draft: .secondary
+        case .closed: PullStyle.amber
+        case .merged: PullStyle.violet
+        }
+        Text(status.rawValue).font(.caption.weight(.semibold)).foregroundStyle(color)
             .padding(.horizontal, 7).padding(.vertical, 3).background(color.opacity(0.13), in: Capsule())
+            .fixedSize()
     }
 }
 
@@ -60,14 +67,57 @@ extension View {
 }
 
 struct PullMessage: View {
-    private let content: AttributedString
+    private let source: String
 
-    init(_ source: String) {
-        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        content = (try? AttributedString(markdown: source, options: options)) ?? AttributedString(source)
-    }
+    init(_ source: String) { self.source = source }
 
     var body: some View {
-        Text(content).textSelection(.enabled).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+        PagedPullMessage(source: source).id(source)
+    }
+}
+
+private struct PagedPullMessage: View {
+    let source: String
+    @State private var fragments: [Fragment] = []
+    @State private var requested: String.Index?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(fragments) { fragment in
+                Text(fragment.content).textSelection(.enabled).lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let next = fragments.last?.next {
+                Button("Show more of message") { requested = next }
+                    .buttonStyle(.link).font(.caption)
+                    .disabled(requested == next)
+            }
+        }
+        .task(id: requested) {
+            let start = requested ?? source.startIndex
+            guard fragments.last?.id != start else { return }
+            let fragment = await Fragment.render(source, at: start)
+            if !Task.isCancelled { fragments.append(fragment) }
+        }
+    }
+
+    private struct Fragment: Identifiable, Sendable {
+        let id: String.Index
+        let content: AttributedString
+        let next: String.Index?
+
+        nonisolated static func render(_ source: String, at start: String.Index) async -> Self {
+            let limit = source.index(start, offsetBy: 6_000, limitedBy: source.endIndex) ?? source.endIndex
+            // Split long messages at a nearby newline when possible so ordinary Markdown stays intact.
+            var end = limit
+            if limit < source.endIndex {
+                let lowerBound = source.index(limit, offsetBy: -750)
+                if let newline = source[lowerBound..<limit].lastIndex(of: "\n") { end = source.index(after: newline) }
+            }
+            let text = String(source[start..<end])
+            let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            let content = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+            return Self(id: start, content: content, next: end < source.endIndex ? end : nil)
+        }
     }
 }

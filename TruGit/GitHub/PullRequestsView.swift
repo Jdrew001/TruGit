@@ -83,118 +83,380 @@ struct PullBrowser: View {
     let branch: String
     let showsInbox: Bool
     @State private var filter = "open"
-    @State private var page = 1
-    @State private var more = false
-    @State private var rows: [GitHubPull] = []
+    @State private var order = PullRequestOrder.updated
+    @State private var search = ""
+    @State private var expanded = false
+    @State private var rows: [PullRequestSummary] = []
     @State private var selected: Int?
-    @State private var loading = false
+    @State private var loading = true
     @State private var error: String?
     @State private var revision = 0
     @State private var creating = false
     @State private var preferred: Int?
-    @State private var inboxWidth: CGFloat = 274
+    @State private var inboxWidth: CGFloat = 328
+    @State private var nextPage: Request?
+    @State private var requestedPage: Request?
+    @State private var loadedScope: Scope?
+
+    private struct Scope: Equatable {
+        let state: String
+        let order: PullRequestOrder
+        let search: String
+    }
+
+    private struct Request: Equatable {
+        let scope: Scope
+        let revision: Int
+        let page: Int
+
+        func next() -> Self { Self(scope: scope, revision: revision, page: page + 1) }
+    }
+
+    private var scope: Scope {
+        Scope(state: filter, order: order, search: String(search.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)))
+    }
+
+    private var request: Request {
+        if let requestedPage, requestedPage.scope == scope, requestedPage.revision == revision { return requestedPage }
+        return Request(scope: scope, revision: revision, page: 1)
+    }
+
+    private var visibleRows: [PullRequestSummary] { loadedScope == scope ? rows : [] }
+    private var showList: Bool { expanded || showsInbox || selected == nil }
 
     var body: some View {
+        let current = request
         GeometryReader { geometry in
-            let maximum = max(220, min(350, geometry.size.width - 238))
+            let maximum = max(274, min(500, geometry.size.width - 460))
             let width = min(inboxWidth, maximum)
-            HStack(spacing: 0) {
-                if showsInbox || selected == nil {
-                    inbox.frame(width: width)
-                    WidthDivider(label: "Pull request inbox width", width: width, limits: 220...maximum) { proposed, _ in
-                        inboxWidth = proposed
+            ZStack(alignment: .leading) {
+                HStack(spacing: 0) {
+                    if showsInbox || selected == nil {
+                        Spacer().frame(width: width + 8)
                     }
-                    .frame(width: 8)
+                    detail
                 }
-                if let selected {
-                    PullDetailView(api: api, repo: repo, number: selected, login: login, refresh: revision)
-                        .id(selected)
-                } else {
-                    ContentUnavailableView("Select a pull request", systemImage: "text.bubble",
-                                           description: Text("Its conversation and changed files will appear here."))
-                        .frame(maxWidth: .infinity)
+                .opacity(expanded ? 0 : 1)
+                .accessibilityHidden(expanded)
+                .allowsHitTesting(!expanded)
+
+                if showList {
+                    HStack(spacing: 0) {
+                        inbox(columns: expanded)
+                            .frame(width: expanded ? geometry.size.width : width)
+                        if !expanded {
+                            WidthDivider(label: "Pull request inbox width", width: width, limits: 274...maximum) { proposed, _ in
+                                inboxWidth = proposed
+                            }
+                            .frame(width: 8)
+                        }
+                    }
                 }
             }
         }
-        .onChange(of: filter) { page = 1; rows = []; more = false; selected = nil }
-        .onChange(of: revision) { page = 1 }
-        .task(id: Query(state: filter, page: page, revision: revision)) {
-            loading = true; error = nil
-            do {
-                let result = try await api.pulls(repo, state: filter, page: page)
-                try Task.checkCancellation()
-                let existing = Set(rows.map(\.number))
-                rows = page == 1 ? result.items : rows + result.items.filter { !existing.contains($0.number) }
-                more = result.more
-                if let preferred { selected = preferred; self.preferred = nil }
-                else if !rows.contains(where: { $0.number == selected }) { selected = rows.first?.number }
-            } catch {
-                if !Task.isCancelled { self.error = error.localizedDescription; more = false }
-            }
-            if !Task.isCancelled { loading = false }
-        }
+        .onChange(of: scope) { requestedPage = nil }
+        .task(id: current) { await load(current) }
         .sheet(isPresented: $creating) {
             NewPullRequestView(api: api, repo: repo, repos: remotes, localBranch: branch) { created in
-                preferred = created.number; filter = "open"; page = 1; revision += 1
+                preferred = created.number
+                filter = "open"
+                search = ""
+                expanded = false
+                revision += 1
             }
             .zoomAppDialog()
         }
     }
-    private var inbox: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Picker("Status", selection: $filter) {
-                    Text("Open").tag("open")
-                    Text("Closed").tag("closed")
-                }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 142)
-                Spacer(minLength: 0)
-                Button { revision += 1 } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .help("Refresh pull requests").accessibilityLabel("Refresh pull requests")
-                Button { creating = true } label: { Label("New PR", systemImage: "plus") }
-                    .buttonStyle(PullPrimaryButton())
-            }.padding(.bottom, 12)
-            Divider()
-            if let error { Text(error).font(.caption).foregroundStyle(PullStyle.amber).textSelection(.enabled).padding(.vertical, 8) }
-            if rows.isEmpty && !loading && error == nil {
-                Label("No " + filter + " pull requests", systemImage: "tray")
-                    .font(.callout).foregroundStyle(.secondary).padding(.vertical, 16)
-            }
-            ScrollView {
-                LazyVStack(spacing: 4) {
-                    ForEach(rows) { pr in
-                        let active = selected == pr.number
-                        Button { selected = pr.number } label: {
-                            VStack(alignment: .leading, spacing: 7) {
-                                HStack {
-                                    Text("#\(pr.number)").font(.caption.monospacedDigit()).foregroundStyle(active ? PullStyle.mint : .secondary)
-                                    Spacer()
-                                    PullStatus(pull: pr)
-                                }
-                                Text(pr.title).font(.system(size: 13, weight: .semibold)).lineLimit(2)
-                                HStack(spacing: 5) {
-                                    PullAvatar(name: pr.user?.login ?? "GitHub", size: 17)
-                                    Text(pr.user?.login ?? "GitHub").font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(active ? PullStyle.mint.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 7))
-                            .overlay {
-                                if active { RoundedRectangle(cornerRadius: 7).strokeBorder(PullStyle.mint.opacity(0.4)) }
-                            }
-                            .overlay(alignment: .bottom) {
-                                if !active { Divider().padding(.horizontal, 8) }
-                            }
-                            .contentShape(Rectangle())
-                        }.buttonStyle(.plain).accessibilityAddTraits(active ? .isSelected : [])
-                    }
-                    if loading { ProgressView().controlSize(.small).padding(8) }
-                    if more && !loading { Button("Load more") { page += 1 }.padding(6) }
-                }.padding(.vertical, 8)
-            }
-        }.padding(.horizontal, 12).padding(.top, 15).frame(maxHeight: .infinity, alignment: .topLeading)
-            .background(PullStyle.rail)
+
+    @ViewBuilder
+    private var detail: some View {
+        if let selected {
+            PullDetailView(api: api, repo: repo, number: selected, login: login, refresh: revision)
+                .id(selected)
+        } else {
+            ContentUnavailableView("Select a pull request", systemImage: "arrow.triangle.pull",
+                                   description: Text("Open a pull request to review its code and conversation."))
+                .frame(maxWidth: .infinity)
+        }
     }
 
-    private struct Query: Equatable { let state: String; let page: Int; let revision: Int }
+    private func inbox(columns: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            inboxControls
+            Divider()
+            if columns { columnHeadings }
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(visibleRows) { pull in
+                        PullInboxRow(pull: pull, order: order, columns: columns, selected: selected == pull.number) {
+                            selected = pull.number
+                            expanded = false
+                        }
+                    }
+                    listMessage
+                }
+                .padding(.horizontal, columns ? 18 : 8)
+                .padding(.vertical, 5)
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(PullStyle.rail)
+    }
+
+    @ViewBuilder
+    private var inboxControls: some View {
+        if expanded {
+            HStack(spacing: 12) {
+                statePicker
+                searchField.frame(maxWidth: 360)
+                sortPicker.fixedSize()
+                Spacer(minLength: 4)
+                listCount
+                listModeButton
+                listActions
+            }
+            .padding(.horizontal, 19).padding(.vertical, 12)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    statePicker
+                    Spacer(minLength: 0)
+                    listActions
+                }
+                searchField
+                HStack {
+                    listModeButton
+                    Spacer(minLength: 4)
+                    sortPicker
+                }
+            }
+            .padding(12)
+        }
+    }
+
+    private var statePicker: some View {
+        Picker("Status", selection: $filter) {
+            Text("Open").tag("open")
+            Text("Closed").tag("closed")
+        }
+        .pickerStyle(.segmented).labelsHidden().frame(width: 132)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search title, @author, or #number", text: $search)
+                .textFieldStyle(.plain)
+                .accessibilityLabel("Search pull requests")
+            if !search.isEmpty {
+                inboxButton("Clear search", icon: "xmark.circle.fill") { search = "" }
+            }
+        }
+        .padding(.horizontal, 9).padding(.vertical, 8)
+        .background(PullStyle.inset, in: RoundedRectangle(cornerRadius: 6))
+        .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(PullStyle.stroke).allowsHitTesting(false) }
+    }
+
+    private var sortPicker: some View {
+        Picker("Sort pull requests", selection: $order) {
+            ForEach(PullRequestOrder.allCases, id: \.self) { Text($0.title).tag($0) }
+        }
+        .labelsHidden().controlSize(.small)
+    }
+
+    private var listActions: some View {
+        HStack(spacing: 8) {
+            inboxButton("Refresh pull requests", icon: "arrow.clockwise") { revision += 1 }
+            Button { creating = true } label: { Label("New PR", systemImage: "plus") }
+                .buttonStyle(PullPrimaryButton())
+        }
+        .fixedSize()
+    }
+
+    private var listModeButton: some View {
+        Button { expanded.toggle() } label: {
+            Label(expanded ? "Split view" : "Full list",
+                  systemImage: expanded ? "rectangle.split.2x1" : "arrow.up.left.and.arrow.down.right")
+                .font(.caption.weight(.medium))
+        }
+        .buttonStyle(.borderless).fixedSize()
+        .accessibilityLabel(expanded ? "Return to split view" : "Expand pull request list")
+    }
+
+    @ViewBuilder
+    private var listCount: some View {
+        if !visibleRows.isEmpty {
+            let count = visibleRows.count
+            Text(nextPage == nil ? (count == 1 ? "1 pull request" : "\(count) pull requests") : "\(count) loaded")
+                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private func inboxButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(title, systemImage: icon, action: action)
+            .labelStyle(.iconOnly).buttonStyle(.plain)
+            .foregroundStyle(.secondary).padding(2)
+            .help(title).accessibilityLabel(title)
+    }
+
+    private var columnHeadings: some View {
+        HStack(spacing: 16) {
+            Text("Pull request").frame(maxWidth: .infinity, alignment: .leading)
+            Text("Author").frame(width: PullInboxRow.authorWidth, alignment: .leading)
+            Text(order.dateHeading).frame(width: PullInboxRow.dateWidth, alignment: .leading)
+            Text("Status").frame(width: PullInboxRow.statusWidth, alignment: .leading)
+        }
+        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        .padding(.horizontal, 30).padding(.vertical, 9)
+        .background(PullStyle.inset)
+    }
+
+    @ViewBuilder
+    private var listMessage: some View {
+        if let error {
+            Text(error).font(.caption).foregroundStyle(PullStyle.amber)
+                .textSelection(.enabled).padding(12)
+        } else if loading {
+            ProgressView().controlSize(.small).padding(12)
+        } else if visibleRows.isEmpty {
+            Label(scope.search.isEmpty ? "No \(filter) pull requests" : "No matching \(filter) pull requests",
+                  systemImage: scope.search.isEmpty ? "tray" : "magnifyingglass")
+                .font(.callout).foregroundStyle(.secondary).padding(.vertical, 18)
+        } else if let nextPage, nextPage.scope == scope, nextPage.revision == revision {
+            Button("Load more") { requestedPage = nextPage }
+                .padding(12)
+        }
+    }
+
+    private func load(_ request: Request) async {
+        let incoming = request.scope
+        let replaced = loadedScope != incoming
+        loading = true
+        error = nil
+        if replaced {
+            if loadedScope?.state != incoming.state { selected = nil }
+            rows = []
+            nextPage = nil
+        }
+        do {
+            if replaced && !incoming.search.isEmpty { try await Task.sleep(for: .milliseconds(350)) }
+            let result = try await api.pulls(repo, state: incoming.state, order: incoming.order,
+                                             search: incoming.search, page: request.page)
+            try Task.checkCancellation()
+            var existing = request.page == 1 ? [] : Set(rows.map(\.number))
+            let newRows = result.items.filter { existing.insert($0.number).inserted }
+            rows = request.page == 1 ? newRows : rows + newRows
+            loadedScope = incoming
+            nextPage = result.more ? request.next() : nil
+            if let preferred {
+                selected = preferred
+                self.preferred = nil
+            } else if selected == nil || (replaced && !rows.contains(where: { $0.number == selected })) {
+                selected = rows.first?.number
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            self.error = error.localizedDescription
+        }
+        if !Task.isCancelled { loading = false }
+    }
+}
+
+private struct PullInboxRow: View {
+    static let authorWidth: CGFloat = 180
+    static let dateWidth: CGFloat = 118
+    static let statusWidth: CGFloat = 74
+
+    let pull: PullRequestSummary
+    let order: PullRequestOrder
+    let columns: Bool
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            if columns { tableRow } else { compactRow }
+        }
+        .buttonStyle(.plain)
+        .background(selected ? PullStyle.blue.opacity(0.13) : hovering ? PullStyle.surface : .clear,
+                    in: RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .leading) {
+            if selected { Capsule().fill(PullStyle.blue).frame(width: 3).padding(.vertical, 7) }
+        }
+        .overlay(alignment: .bottom) {
+            if !selected { Divider().padding(.horizontal, 11) }
+        }
+        .onHover { hovering = $0 }
+        .accessibilityLabel("\(pull.title), #\(pull.number), \(pull.author), \(order.dateHeading) \(dateText), \(pull.status.rawValue)")
+        .accessibilityIdentifier("pull-request-\(pull.number)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .help(pull.title)
+    }
+
+    private var tableRow: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 5) {
+                title
+                number
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            author.frame(width: Self.authorWidth, alignment: .leading)
+            date.frame(width: Self.dateWidth, alignment: .leading)
+            PullStatus(status: pull.status).frame(width: Self.statusWidth, alignment: .leading)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .contentShape(Rectangle())
+    }
+
+    private var compactRow: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            title
+            HStack(spacing: 6) {
+                author
+                Spacer(minLength: 0)
+                date.fixedSize()
+            }
+            HStack(spacing: 7) {
+                number
+                PullStatus(status: pull.status)
+            }
+        }
+        .padding(.horizontal, 11).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private var title: some View {
+        Text(pull.title)
+            .font(.system(size: columns ? 15 : 14, weight: .semibold))
+            .foregroundStyle(.primary).lineLimit(columns ? 2 : 3)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var number: some View {
+        Text("#\(pull.number)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+    }
+
+    private var author: some View {
+        HStack(spacing: 6) {
+            PullAvatar(name: pull.author, size: 18)
+            Text(pull.author).lineLimit(1).truncationMode(.tail)
+        }
+        .font(.system(size: 12, weight: .medium))
+        .help(pull.author)
+    }
+
+    private var dateText: String {
+        pull.date(for: order)?.formatted(date: .abbreviated, time: .omitted) ?? "—"
+    }
+
+    private var date: some View {
+        Text(dateText)
+            .font(.system(size: 11, weight: .medium).monospacedDigit())
+            .foregroundStyle(.secondary)
+            .help(pull.date(for: order).map { order.dateHeading + " " + $0.formatted(date: .complete, time: .shortened) }
+                  ?? order.dateHeading + " date unavailable")
+    }
 }

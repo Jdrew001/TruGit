@@ -106,6 +106,118 @@ final class HostedReviewTests: TruGitUITestCase {
         try JSONSerialization.data(withJSONObject: data).write(to: fixture, options: .atomic)
     }
 
+    func testExpandedInboxShowsMetadataAndFindsAPullOutsideTheList() throws {
+        try writePages { data in
+            var other = try XCTUnwrap(data["pull"] as? [String: Any])
+            other["number"] = 88
+            other["title"] = "Move billing to the new ledger"
+            other["user"] = ["login": "octavia"]
+            other["draft"] = true
+            return ["/search/issues||1|repo:example/review is:pr is:open author:octavia": ["body": ["items": [other]]]]
+        }
+        openPR()
+        clickVisible(app.buttons["Expand pull request list"])
+        expectText("Author")
+        expectText("Updated")
+        let original = app.buttons["pull-request-42"]
+        XCTAssertTrue(original.exists)
+        XCTAssertTrue(original.label.contains("Review navigation"))
+        XCTAssertTrue(original.label.contains("author"))
+        XCTAssertTrue(original.label.contains("2026"))
+
+        enter("@octavia", in: app.textFields["Search pull requests"])
+        let result = app.buttons["pull-request-88"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        XCTAssertTrue(result.label.contains("Move billing to the new ledger"))
+        XCTAssertTrue(result.label.contains("octavia"))
+        XCTAssertTrue(result.label.contains("Draft"))
+        XCTAssertFalse(original.exists)
+    }
+
+    func testDiffShowsOldAndNewCodeAndKeepsFileAcrossTabs() throws {
+        openPR()
+        expectText("Old")
+        expectText("New")
+        for line in ["let size = 20", "let size = 50", "tenant.inbox"] {
+            let code = app.staticTexts.matching(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", line, line)).firstMatch
+            XCTAssertTrue(code.waitForExistence(timeout: 10))
+        }
+        clickVisible(app.buttons["Wrap lines"])
+        clickVisible(app.buttons["Wrap lines"])
+        clickVisible(app.buttons["Sources/Bravo.swift"])
+        clickVisible(app.buttons["Conversation"])
+        expectText("Fixture PR description.")
+        clickVisible(app.buttons["Files changed"])
+        expectText("Sources/Bravo.swift")
+        expectText("struct Bravo {}")
+    }
+
+    func testSlowConversationCanBeLeftAndARequestFailureCanBeRetried() throws {
+        let route = "/repos/example/review/issues/42/comments||1"
+        try writePages { _ in
+            [route: ["body": ["message": "Conversation unavailable"], "status": 503, "delayMilliseconds": 5_000]]
+        }
+        openPR()
+        clickVisible(app.buttons["Conversation"])
+        app.buttons["Files changed"].click()
+        expectText("Sources/Alpha.swift")
+        XCTAssertTrue(app.buttons["Submit review…"].isEnabled)
+
+        clickVisible(app.buttons["Conversation"])
+        expectText("GitHub returned 503. Conversation unavailable")
+        try writePages { _ in [:] }
+        clickVisible(app.buttons["Reload"])
+        expectText("First comment")
+    }
+
+    func testLargeConversationKeepsRepliesAndLongMessagesBounded() throws {
+        try writePages { _ in
+            let root: [String: Any] = ["id": 3, "user": ["login": "author"], "body": "Thread for large review",
+                                       "path": "Sources/Alpha.swift", "line": 25, "diff_hunk": "@@ -24 +24 @@\n-old()\n+new()"]
+            let replies: [[String: Any]] = (0..<180).map { index in
+                ["id": 100 + index, "user": ["login": "author"], "path": "Sources/Alpha.swift",
+                 "in_reply_to_id": 3, "body": "Reply number \(index)"]
+            }
+            let long = "Long review message\n" + String(repeating: "**Detail** with `inline code`.\n", count: 1_200)
+            let conversation: [[String: Any]] = (0..<100).map { index in
+                ["id": 1_000 + index, "user": ["login": "reviewer"], "body": index == 0 ? long : "Discussion \(index)"]
+            }
+            let inline = "/repos/example/review/pulls/42/comments||"
+            return [
+                inline + "1": ["body": [root] + Array(replies.prefix(99)),
+                                "headers": ["Link": "<https://api.github.com/next>; rel=\"next\""]],
+                inline + "2": ["body": Array(replies.dropFirst(99))],
+                "/repos/example/review/issues/42/comments||1": ["body": conversation],
+            ]
+        }
+        openPR()
+        clickVisible(app.buttons["Conversation"])
+        expectText("Thread for large review")
+        expectText("Reply number 3")
+        XCTAssertFalse(app.staticTexts["Reply number 4"].exists)
+        clickVisible(app.links["Show 12 more replies"])
+        expectText("Reply number 4")
+        clickVisible(app.buttons["Files changed"])
+        expectText("Sources/Alpha.swift")
+    }
+
+    func testLargePatchAndMissingPatchAreBothNavigable() throws {
+        try writePages { data in
+            var files = try XCTUnwrap(data["files"] as? [[String: Any]])
+            let generated = String(repeating: "x", count: 40_000)
+            files[0]["patch"] = "@@ -0,0 +1,2 @@\n+let buffer = \"\(generated)\"\n+let finished = true"
+            files[1].removeValue(forKey: "patch")
+            return ["/repos/example/review/pulls/42/files||1": ["body": files]]
+        }
+        openPR()
+        clickVisible(app.buttons["Next patch page"])
+        expectText("let finished = true")
+        clickVisible(app.buttons["Sources/Bravo.swift"])
+        expectText("No text diff")
+        clickVisible(app.buttons["Sources/Charlie.swift"])
+        expectText("struct Charlie {}")
+    }
+
     func testPaginationIncludesFilesFromTheSecondPage() throws {
         try writePages { data in
             let files = try XCTUnwrap(data["files"] as? [[String: Any]])

@@ -50,6 +50,44 @@ struct GitHubRepository: Hashable, Identifiable, Sendable {
 
 struct GitHubUser: Decodable, Sendable { let login: String }
 
+enum PullRequestStatus: String {
+    case open = "Open", draft = "Draft", closed = "Closed", merged = "Merged"
+
+    init(state: String, draft: Bool?, mergedAt: String?) {
+        if mergedAt != nil { self = .merged }
+        else if state == "closed" { self = .closed }
+        else { self = draft == true ? .draft : .open }
+    }
+}
+
+enum PullRequestOrder: String, CaseIterable, Equatable {
+    case updated, created
+
+    var title: String { self == .updated ? "Recently updated" : "Newest opened" }
+    var dateHeading: String { self == .updated ? "Updated" : "Opened" }
+}
+
+struct PullRequestSummary: Decodable, Identifiable, Sendable {
+    // Search responses include the merge date in their pull_request object.
+    struct SearchMetadata: Decodable, Sendable { let mergedAt: String? }
+
+    let number: Int
+    let title: String
+    let user: GitHubUser?
+    let createdAt: Date?
+    let updatedAt: Date?
+    let state: String
+    let draft: Bool?
+    let mergedAt: String?
+    let pullRequest: SearchMetadata?
+
+    var id: Int { number }
+    var status: PullRequestStatus { .init(state: state, draft: draft, mergedAt: mergedAt ?? pullRequest?.mergedAt) }
+    var author: String { user?.login ?? "Unknown author" }
+
+    func date(for order: PullRequestOrder) -> Date? { order == .updated ? updatedAt : createdAt }
+}
+
 struct GitHubPull: Decodable, Identifiable, Sendable {
     struct Branch: Decodable, Sendable { let label: String; let sha: String }
     let number: Int
@@ -61,8 +99,9 @@ struct GitHubPull: Decodable, Identifiable, Sendable {
     let state: String
     let draft: Bool?
     let mergedAt: String?
+    let createdAt: Date?
     var id: Int { number }
-    var status: String { mergedAt != nil ? "Merged" : (draft == true && state == "open" ? "Draft" : state.capitalized) }
+    var status: PullRequestStatus { .init(state: state, draft: draft, mergedAt: mergedAt) }
 }
 
 struct PullActivity: Decodable, Identifiable, Sendable {
@@ -77,7 +116,10 @@ struct PullActivity: Decodable, Identifiable, Sendable {
     let diffHunk: String?
     let createdAt: Date?
     let submittedAt: Date?
-    var key: String { (state ?? (path == nil ? "comment" : "inline")) + String(id) }
+    var key: String {
+        let kind = path != nil ? "inline" : state == nil ? "comment" : "review"
+        return "\(kind)-\(id)"
+    }
     var title: String {
         switch state {
         case "APPROVED": "approved"
@@ -86,6 +128,34 @@ struct PullActivity: Decodable, Identifiable, Sendable {
         case "COMMENTED": "reviewed"
         default: path == nil ? "commented" : "commented on code"
         }
+    }
+}
+
+struct PullConversation: Sendable {
+    struct Thread: Identifiable, Sendable {
+        let entry: PullActivity
+        let replies: [PullActivity]
+        var id: String { entry.key }
+    }
+
+    let threads: [Thread]
+
+    nonisolated static func build(from activity: [PullActivity]) async -> Self {
+        var seen = Set<String>()
+        let unique = activity.filter { seen.insert($0.key).inserted }
+        let inlineRoots = Set(unique.filter { $0.path != nil && $0.inReplyToId == nil }.map(\.id))
+        var replies: [Int: [PullActivity]] = [:]
+        var roots: [PullActivity] = []
+        for entry in unique {
+            if let parent = entry.inReplyToId, inlineRoots.contains(parent) {
+                replies[parent, default: []].append(entry)
+            } else {
+                roots.append(entry)
+            }
+        }
+        return Self(threads: roots.map { entry in
+            Thread(entry: entry, replies: entry.path == nil ? [] : replies[entry.id] ?? [])
+        })
     }
 }
 

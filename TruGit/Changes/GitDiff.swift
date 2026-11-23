@@ -74,6 +74,15 @@ struct GitDiff: Sendable {
     let rows: [Row]
     let isBinary: Bool
 
+    static func hunkStarts(in header: some StringProtocol) -> (before: Int, after: Int)? {
+        let parts = header.split(separator: " ", maxSplits: 3)
+        guard parts.count >= 3,
+              let before = Int(parts[1].dropFirst().prefix(while: \.isNumber)),
+              let after = Int(parts[2].dropFirst().prefix(while: \.isNumber))
+        else { return nil }
+        return (before, after)
+    }
+
     static func read(_ request: DiffRequest) async throws -> Self {
         let options = [
             "--no-color", "--no-ext-diff", "--no-textconv", "--unified=3",
@@ -149,17 +158,13 @@ private struct PatchParser {
 
     private mutating func startHunk(_ header: String) {
         flushChanges()
-        let parts = header.split(separator: " ", maxSplits: 3)
-        guard parts.count >= 3,
-              let oldStart = Int(parts[1].dropFirst().prefix(while: \.isNumber)),
-              let newStart = Int(parts[2].dropFirst().prefix(while: \.isNumber))
-        else {
+        guard let starts = GitDiff.hunkStarts(in: header) else {
             insideHunk = false
             return
         }
 
-        before = oldStart
-        after = newStart
+        before = starts.before
+        after = starts.after
         insideHunk = true
         append(.hunk(header))
     }

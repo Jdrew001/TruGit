@@ -3,6 +3,9 @@ import Foundation
 
 /// Compiled only into the E2E app. Unknown requests fail locally.
 final class GitHubFixtureProtocol: URLProtocol {
+    private let lock = NSLock()
+    private var pending: DispatchWorkItem?
+
     static func api() -> GitHubAPI {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [GitHubFixtureProtocol.self]
@@ -27,8 +30,10 @@ final class GitHubFixtureProtocol: URLProtocol {
             let state = query.first { $0.name == "state" }?.value ?? ""
             let pageKey = [route, state, page].joined(separator: "|")
             let pages = responses["pages"] as? [String: [String: Any]]
+            let searchKey = query.first { $0.name == "q" }?.value.map { pageKey + "|" + $0 }
             var status = 200
             var headers: [String: String] = [:]
+            var delayMilliseconds = 0
             let payload: Any
             if request.httpMethod == "POST" {
                 guard let ledger = ProcessInfo.processInfo.environment["TRUGIT_REQUEST_LOG"],
@@ -39,9 +44,10 @@ final class GitHubFixtureProtocol: URLProtocol {
                 let receipt: [String: Any] = ["path": route, "fields": fields]
                 try JSONSerialization.data(withJSONObject: receipt).write(to: URL(fileURLWithPath: ledger), options: .atomic)
                 payload = result
-            } else if let response = pages?[pageKey], let body = response["body"] {
+            } else if let response = searchKey.flatMap({ pages?[$0] }) ?? pages?[pageKey], let body = response["body"] {
                 status = response["status"] as? Int ?? 200
                 headers = response["headers"] as? [String: String] ?? [:]
+                delayMilliseconds = response["delayMilliseconds"] as? Int ?? 0
                 payload = body
             } else if let routes = responses["routes"] as? [String: Any], let result = routes[route] {
                 payload = result
@@ -56,9 +62,13 @@ final class GitHubFixtureProtocol: URLProtocol {
             }
             let body = try JSONSerialization.data(withJSONObject: payload)
             let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: headers)!
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: body)
-            client?.urlProtocolDidFinishLoading(self)
+            if delayMilliseconds > 0 {
+                let item = DispatchWorkItem { [weak self] in self?.deliver(body, response: response) }
+                lock.withLock { pending = item }
+                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delayMilliseconds), execute: item)
+            } else {
+                deliver(body, response: response)
+            }
         } catch {
             client?.urlProtocol(self, didFailWithError: error)
         }
@@ -79,7 +89,18 @@ final class GitHubFixtureProtocol: URLProtocol {
         }
     }
 
-    override func stopLoading() {}
+    private func deliver(_ body: Data, response: HTTPURLResponse) {
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {
+        lock.withLock {
+            pending?.cancel()
+            pending = nil
+        }
+    }
 
 }
 #endif

@@ -7,8 +7,9 @@ struct PullDetailView: View {
     let login: String
     let refresh: Int
     @State private var pull: GitHubPull?
-    @State private var activity: [PullActivity] = []
+    @State private var conversation = PullConversation(threads: [])
     @State private var files: [ReviewFile] = []
+    @State private var selectedFile: String?
     @State private var showFiles = true
     @State private var message = ""
     @State private var reviewTarget: GitHubPull?
@@ -17,37 +18,13 @@ struct PullDetailView: View {
     @State private var loading = true
     @State private var revision = 0
     @State private var error: String?
+    @State private var commentError: String?
 
     var body: some View {
+        let request = DetailQuery(refresh: refresh, revision: revision, files: showFiles)
         VStack(alignment: .leading, spacing: 0) {
             if let pull {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        PullStatus(pull: pull)
-                        Text("#\(number)").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                        Spacer()
-                        Link(destination: URL(string: "https://github.com/" + repo.id + "/pull/\(number)")!) {
-                            Label("GitHub", systemImage: "arrow.up.right.square")
-                        }.font(.caption)
-                    }
-                    Text(pull.title).font(.system(size: 23, weight: .semibold)).textSelection(.enabled)
-                    HStack(spacing: 7) {
-                        PullAvatar(name: pull.user?.login ?? "GitHub", size: 20)
-                        Text(pull.user?.login ?? "GitHub").font(.callout.weight(.medium))
-                        Text("wants to merge").foregroundStyle(.secondary)
-                        branchLabel(pull.head.label)
-                        Text("into").foregroundStyle(.secondary)
-                        branchLabel(pull.base.label)
-                    }.font(.caption).lineLimit(1)
-                    HStack(spacing: 14) {
-                        detailTab("Conversation", icon: "bubble.left.and.bubble.right", fileTab: false)
-                        detailTab("Files changed", icon: "doc.text", fileTab: true)
-                        Spacer()
-                        Button { reviewTarget = pull } label: { Label("Submit review…", systemImage: "checkmark.bubble") }
-                            .buttonStyle(PullPrimaryButton())
-                            .disabled(pull.state != "open" || loading || sending || error != nil)
-                    }.padding(.top, 5)
-                }.padding(.horizontal, 20).padding(.vertical, 14)
+                header(pull)
                 Divider()
             }
             if let error {
@@ -57,11 +34,14 @@ struct PullDetailView: View {
                     Button("Reload") { revision += 1 }
                 }.padding(8)
             }
-            if loading { ProgressView().controlSize(.small).padding(8) }
+            if loading && pull == nil {
+                ProgressView("Loading pull request…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             if showFiles {
                 if !files.isEmpty {
-                    PersonalFileReview(files: files, login: login, repository: repo.id, number: number)
-                        .disabled(loading || error != nil)
+                    PersonalFileReview(files: files, selection: $selectedFile, login: login, repository: repo.id, number: number)
+                } else if loading && pull != nil {
+                    ProgressView("Loading changed files…").frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if !loading && error == nil {
                     ContentUnavailableView("No changed files", systemImage: "doc")
                 }
@@ -75,13 +55,16 @@ struct PullDetailView: View {
                                     PullMessage(body)
                                 }.padding(14).frame(maxWidth: .infinity, alignment: .leading).pullCard()
                             }
-                            let threads = Dictionary(grouping: activity.filter { $0.inReplyToId != nil }, by: \.inReplyToId)
-                            let roots = Set(activity.filter { $0.path != nil && $0.inReplyToId == nil }.map(\.id))
-                            ForEach(activity.filter { $0.inReplyToId.map { !roots.contains($0) } ?? true }, id: \.key) { entry in
-                                PullActivityCard(entry: entry, replies: entry.path == nil ? [] : threads[entry.id] ?? [],
-                                                 canReply: !sending, reply: { replyTo = $0 })
+                            ForEach(conversation.threads) { thread in
+                                PullActivityCard(entry: thread.entry, replies: thread.replies, canReply: !sending, reply: { replyTo = $0 })
                             }
-                            if activity.isEmpty && !loading && error == nil { Text("No comments or reviews yet").foregroundStyle(.secondary) }
+                            if conversation.threads.isEmpty {
+                                if loading {
+                                    ProgressView("Loading conversation…").controlSize(.small)
+                                } else if error == nil {
+                                    Text("No comments or reviews yet").foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -91,6 +74,9 @@ struct PullDetailView: View {
                 HStack(alignment: .bottom, spacing: 10) {
                     PullAvatar(name: login)
                     VStack(alignment: .leading, spacing: 5) {
+                        if let commentError {
+                            Text(commentError).font(.caption).foregroundStyle(PullStyle.amber).textSelection(.enabled)
+                        }
                         if let replyTo {
                             HStack {
                                 Text("Reply to " + (replyTo.user?.login ?? "thread") + " · " + (replyTo.path ?? "")).font(.caption)
@@ -106,29 +92,13 @@ struct PullDetailView: View {
                     Button(replyTo == nil ? "Comment" : "Send reply") { Task { await postComment() } }
                         .buttonStyle(PullPrimaryButton())
                         .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if sending { ProgressView().controlSize(.small).accessibilityLabel("Posting comment") }
                 }.padding(12).background(PullStyle.rail).disabled(sending)
 
             }
         }
         .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: DetailQuery(refresh: refresh, revision: revision, files: showFiles)) {
-            loading = true; error = nil
-            do {
-                let latest = try await api.pull(repo, number)
-                try Task.checkCancellation()
-                pull = latest
-                if showFiles {
-                    let loaded = try await api.files(repo, number)
-                    try Task.checkCancellation()
-                    files = loaded.map(ReviewFile.init)
-                } else {
-                    let loaded = try await api.activity(repo, number)
-                    try Task.checkCancellation()
-                    activity = loaded
-                }
-            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
-            if !Task.isCancelled { loading = false }
-        }
+        .task(id: request) { await load(request) }
         .sheet(item: $reviewTarget) { reviewed in
             ReviewSheet(api: api, repo: repo, pull: reviewed, login: login) {
                 showFiles = false
@@ -136,6 +106,96 @@ struct PullDetailView: View {
             }
             .zoomAppDialog()
         }
+    }
+
+    private func load(_ request: DetailQuery) async {
+        loading = true
+        error = nil
+        defer { if !Task.isCancelled { loading = false } }
+        do {
+            async let pending = loadPanel(files: request.files)
+            let latest = try await api.pull(repo, number)
+            try Task.checkCancellation()
+            pull = latest
+            let panel = try await pending
+            try Task.checkCancellation()
+            switch panel {
+            case .files(let files): self.files = files
+            case .conversation(let conversation): self.conversation = conversation
+            }
+        } catch {
+            if !Task.isCancelled { self.error = error.localizedDescription }
+        }
+    }
+
+    private func loadPanel(files: Bool) async throws -> Panel {
+        if files {
+            let loaded = try await api.files(repo, number)
+            return .files(await ReviewFile.build(from: loaded))
+        }
+        let loaded = try await api.activity(repo, number)
+        return .conversation(await PullConversation.build(from: loaded))
+    }
+
+    private enum Panel: Sendable {
+        case files([ReviewFile])
+        case conversation(PullConversation)
+    }
+
+    private func header(_ pull: GitHubPull) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text("#\(number)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                PullStatus(status: pull.status)
+                Spacer()
+                if loading { ProgressView().controlSize(.small).accessibilityLabel("Refreshing pull request") }
+                Link(destination: URL(string: "https://github.com/" + repo.id + "/pull/\(number)")!) {
+                    Label("GitHub", systemImage: "arrow.up.right.square")
+                }
+                .font(.caption)
+                .help("Open this pull request on GitHub")
+            }
+            Text(pull.title)
+                .font(.system(size: 24, weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(3).help(pull.title).textSelection(.enabled)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 13) { authorDetails(pull); branchRange(pull) }
+                VStack(alignment: .leading, spacing: 6) { authorDetails(pull); branchRange(pull) }
+            }
+            HStack(spacing: 14) {
+                detailTab("Conversation", icon: "bubble.left.and.bubble.right", fileTab: false)
+                detailTab("Files changed", icon: "doc.text", fileTab: true)
+                Spacer()
+                Button { reviewTarget = pull } label: { Label("Submit review…", systemImage: "checkmark.bubble") }
+                    .buttonStyle(PullPrimaryButton())
+                    .disabled(pull.state != "open" || loading || sending || error != nil)
+            }
+            .padding(.top, 4)
+        }
+        .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 7)
+    }
+
+    private func authorDetails(_ pull: GitHubPull) -> some View {
+        let author = pull.user?.login ?? "Unknown author"
+        return HStack(spacing: 6) {
+            PullAvatar(name: author, size: 20)
+            Text(author).font(.callout.weight(.medium)).lineLimit(1)
+            if let date = pull.createdAt {
+                Text("Opened \(date.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize()
+            }
+        }
+    }
+
+    private func branchRange(_ pull: GitHubPull) -> some View {
+        HStack(spacing: 5) {
+            branchLabel(pull.head.label)
+            Image(systemName: "arrow.right").font(.caption2).foregroundStyle(.secondary)
+                .accessibilityLabel("Into")
+            branchLabel(pull.base.label)
+        }
+        .lineLimit(1)
     }
 
     private func branchLabel(_ name: String) -> some View {
@@ -155,7 +215,7 @@ struct PullDetailView: View {
 
     private func postComment() async {
         guard !sending else { return }
-        sending = true; error = nil
+        sending = true; commentError = nil
         defer { sending = false }
         do {
             try await api.comment(message, repo: repo, number: number, replyingTo: replyTo?.inReplyToId ?? replyTo?.id)
@@ -163,7 +223,7 @@ struct PullDetailView: View {
             message = ""
             revision += 1
         }
-        catch { self.error = error.localizedDescription }
+        catch { commentError = error.localizedDescription }
     }
 
     private struct DetailQuery: Equatable { let refresh: Int; let revision: Int; let files: Bool }
@@ -175,6 +235,7 @@ private struct PullActivityCard: View {
     let canReply: Bool
     let reply: (PullActivity) -> Void
     @State private var expanded = false
+    @State private var visibleReplies = 4
 
     private var accent: Color {
         switch entry.state {
@@ -202,13 +263,13 @@ private struct PullActivityCard: View {
                         .font(.caption.monospaced()).foregroundStyle(PullStyle.blue).textSelection(.enabled)
                     if let hunk = entry.diffHunk, !hunk.isEmpty {
                         DisclosureGroup("Code context", isExpanded: $expanded) {
-                            if expanded { PatchText(text: hunk) }
+                            if expanded { PatchText(text: hunk, path: path, compact: true) }
                         }
                             .font(.caption)
                     }
                 }
                 if let body = entry.body, !body.isEmpty { PullMessage(body) }
-                ForEach(replies) { item in
+                ForEach(replies.prefix(visibleReplies), id: \.key) { item in
                     Divider()
                     HStack(alignment: .top) {
                         PullAvatar(name: item.user?.login ?? "GitHub", size: 20)
@@ -217,6 +278,11 @@ private struct PullActivityCard: View {
                             PullMessage(item.body ?? "")
                         }
                     }
+                }
+                if replies.count > visibleReplies {
+                    let remaining = replies.count - visibleReplies
+                    Button("Show \(min(12, remaining)) more replies") { visibleReplies += 12 }
+                        .buttonStyle(.link).font(.caption)
                 }
                 if entry.path != nil { Button("Reply") { reply(entry) }.buttonStyle(.link).font(.caption).disabled(!canReply) }
             }.padding(12).frame(maxWidth: .infinity, alignment: .leading).pullCard()
@@ -262,6 +328,7 @@ private struct ReviewSheet: View {
                 Label(String(pull.head.sha.prefix(8)), systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                     .font(.caption.monospaced()).foregroundStyle(.secondary)
                 Spacer()
+                if sending { ProgressView("Submitting review…").controlSize(.small) }
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(decision == .approve ? "Approve PR" : decision == .changes ? "Request changes" : "Submit comment") {
                     Task { await submit() }

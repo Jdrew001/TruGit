@@ -2,7 +2,11 @@ import Foundation
 
 struct GitHubFailure: LocalizedError {
     let message: String
-    init(_ message: String) { self.message = message }
+    let statusCode: Int?
+    init(_ message: String, statusCode: Int? = nil) {
+        self.message = message
+        self.statusCode = statusCode
+    }
     var errorDescription: String? { message }
 }
 
@@ -27,6 +31,7 @@ struct GitHubAPI: Sendable {
         let base = URL(string: "https://api.github.com")!
         let url = path.reduce(base) { $0.appendingPathComponent($1) }.appending(queryItems: query)
         var request = URLRequest(url: url)
+        if body == nil { request.timeoutInterval = 30 }
         request.httpMethod = body == nil ? "GET" : "POST"
         request.httpBody = body
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
@@ -44,7 +49,7 @@ struct GitHubAPI: Sendable {
             }
             if http.statusCode == 401 { message += "\nReconnect your account in GitHub settings." }
             if [403, 404].contains(http.statusCode) { message += "\nCheck the token’s repository access and organization approval." }
-            throw GitHubFailure("GitHub returned \(http.statusCode). " + message.replacingOccurrences(of: token, with: "••••"))
+            throw GitHubFailure("GitHub returned \(http.statusCode). " + message.replacingOccurrences(of: token, with: "••••"), statusCode: http.statusCode)
         }
         return (data, http)
     }
@@ -71,12 +76,54 @@ struct GitHubAPI: Sendable {
 
     func user() async throws -> GitHubUser { try decode(await request(["user"]).0) }
 
-    struct Page { let items: [GitHubPull]; let more: Bool }
-    func pulls(_ repo: GitHubRepository, state: String, page: Int) async throws -> Page {
-        let (data, response) = try await request(repo.endpoint + ["pulls"], query: [
-            .init(name: "state", value: state), .init(name: "sort", value: "updated"), .init(name: "page", value: String(page))
+    struct Page { let items: [PullRequestSummary]; let more: Bool }
+
+    func pulls(_ repo: GitHubRepository, state: String, order: PullRequestOrder, search: String, page: Int) async throws -> Page {
+        let paging: [URLQueryItem] = [.init(name: "sort", value: order.rawValue),
+                                      .init(name: "per_page", value: "50"), .init(name: "page", value: String(page))]
+        if search.isEmpty {
+            let (data, response) = try await request(repo.endpoint + ["pulls"], query: paging + [
+                .init(name: "state", value: state), .init(name: "direction", value: "desc"),
+            ])
+            return try Page(items: decode(data), more: hasNextPage(response))
+        }
+        if search.hasPrefix("#"), let number = Int(search.dropFirst()), number > 0 {
+            return try await findPull(repo, state: state, number: number)
+        }
+        return try await searchPulls(repo, state: state, search: search, paging: paging)
+    }
+
+    private func findPull(_ repo: GitHubRepository, state: String, number: Int) async throws -> Page {
+        do {
+            let item: PullRequestSummary = try decode(await request(repo.endpoint + ["pulls", String(number)]).0)
+            return Page(items: item.state == state ? [item] : [], more: false)
+        } catch let error as GitHubFailure where error.statusCode == 404 {
+            return Page(items: [], more: false)
+        }
+    }
+
+    private func searchPulls(_ repo: GitHubRepository, state: String, search: String, paging: [URLQueryItem]) async throws -> Page {
+        struct Results: Decodable { let items: [PullRequestSummary] }
+        let author = search.dropFirst()
+        let terms: String
+        if search.hasPrefix("@"), !author.isEmpty, author.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }) {
+            terms = "author:" + author
+        } else {
+            // Quote each word so punctuation in a title cannot introduce search qualifiers.
+            let words = search.split { !$0.isLetter && !$0.isNumber && $0 != "-" && $0 != "_" }
+            guard !words.isEmpty else { return Page(items: [], more: false) }
+            terms = words.map { "\"\($0)\"" }.joined(separator: " ") + " in:title"
+        }
+        let query = "repo:\(repo.id) is:pr is:\(state) " + terms
+        let (data, response) = try await request(["search", "issues"], query: paging + [
+            .init(name: "q", value: query), .init(name: "order", value: "desc"),
         ])
-        return try Page(items: decode(data), more: response.value(forHTTPHeaderField: "Link")?.contains("rel=\"next\"") == true)
+        let result: Results = try decode(data)
+        return Page(items: result.items, more: hasNextPage(response))
+    }
+
+    private func hasNextPage(_ response: HTTPURLResponse) -> Bool {
+        response.value(forHTTPHeaderField: "Link")?.contains("rel=\"next\"") == true
     }
 
     func pull(_ repo: GitHubRepository, _ number: Int) async throws -> GitHubPull {

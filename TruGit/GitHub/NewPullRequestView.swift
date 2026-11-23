@@ -70,6 +70,7 @@ struct NewPullRequestView: View {
             Divider()
             HStack {
                 Spacer()
+                if busy { ProgressView("Creating pull request…").controlSize(.small) }
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Create pull request") { Task { await submit() } }
                     .buttonStyle(PullPrimaryButton())
