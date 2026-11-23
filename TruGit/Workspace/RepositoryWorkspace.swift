@@ -376,24 +376,25 @@ struct RepositoryWorkspace: View {
 
     private var sidebar: some View {
         let query = tab.referenceFilter.trimmingCharacters(in: .whitespacesAndNewlines)
-        let matches = snapshot.referenceBadges.filter { badge in
-            query.isEmpty || badge.name.localizedStandardContains(query) || badge.references.contains { $0.name.localizedStandardContains(query) }
+        let matches = snapshot.sidebarReferences.mapValues { badges in
+            badges.filter {
+                query.isEmpty || $0.name.localizedStandardContains(query) || $0.reference.name.localizedStandardContains(query)
+                    || $0.remotes.contains { $0.name.localizedStandardContains(query) }
+            }
         }
 
         return VStack(spacing: 0) {
             referenceSearch
 
             WorkspaceScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: 1) {
                     navigationRow("All Commits", icon: "clock.arrow.circlepath", selection: .history)
                     navigationRow("Pull Requests", icon: "arrow.triangle.pull", selection: .pullRequests)
-                    let branches = matches.filter { $0.reference.kind != .tag }
-                    let tags = matches.filter { $0.reference.kind == .tag }
-                    if !branches.isEmpty {
-                        referenceGroup(.local, badges: branches, isFiltering: !query.isEmpty)
-                    }
-                    if !tags.isEmpty || query.isEmpty {
-                        referenceGroup(.tag, badges: tags, isFiltering: !query.isEmpty)
+                    ForEach([RepositoryReference.Kind.local, .remote], id: \.self) { kind in
+                        let branches = matches[kind] ?? []
+                        if query.isEmpty || !branches.isEmpty {
+                            referenceGroup(kind, badges: branches, isFiltering: !query.isEmpty)
+                        }
                     }
                     sidebarGroup("Worktrees", "externaldrive", count: snapshot.worktrees.count, expanded: sectionExpansion("worktrees")) {
                         ForEach(snapshot.worktrees) { item in
@@ -429,10 +430,15 @@ struct RepositoryWorkspace: View {
                             .contextMenu { stashActions(stash) }
                         }
                     }
-                    if !query.isEmpty && matches.isEmpty {
+                    let tags = matches[.tag] ?? []
+                    if !tags.isEmpty || query.isEmpty {
+                        referenceGroup(.tag, badges: tags, isFiltering: !query.isEmpty)
+                    }
+                    if !query.isEmpty && matches.values.allSatisfy(\.isEmpty) {
                         Text("No matching branches or tags.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
                     }
                 }
                 .font(.callout)
@@ -470,14 +476,18 @@ struct RepositoryWorkspace: View {
                                           @ViewBuilder rows: () -> Rows) -> some View {
         Button { expanded.wrappedValue.toggle() } label: {
             HStack(spacing: 6) {
-                Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right").frame(width: 10)
-                Image(systemName: icon).frame(width: 14)
-                Text(title.uppercased())
-                Spacer()
-                Text(count, format: .number).monospacedDigit()
+                Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right")
+                    .font(.caption2.weight(.semibold)).frame(width: 10)
+                Image(systemName: icon).frame(width: 15)
+                Text(title.uppercased()).tracking(0.65).lineLimit(1)
+                Spacer(minLength: 4)
+                Text(count, format: .number)
+                    .monospacedDigit().foregroundStyle(WorkspaceColors.accent.opacity(0.86))
             }
             .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            .padding(.horizontal, 5).frame(height: 24).contentShape(Rectangle())
+            .padding(.horizontal, 8).frame(height: 29).contentShape(Rectangle())
+            .background(WorkspaceColors.panel.opacity(0.48))
+            .overlay(alignment: .top) { WorkspaceColors.divider.opacity(0.85).frame(height: 1) }
         }
         .buttonStyle(.plain).padding(.top, 3)
         .accessibilityLabel(title + ", " + String(count))
@@ -548,8 +558,8 @@ struct RepositoryWorkspace: View {
                 set: { tab.sidebarSections[key] = $0 })
     }
 
-    private func referenceExpansion(_ key: String, isFiltering: Bool) -> Binding<Bool> {
-        let saved = sectionExpansion(key, defaultExpanded: true)
+    private func referenceExpansion(_ key: String, isFiltering: Bool, defaultExpanded: Bool = true) -> Binding<Bool> {
+        let saved = sectionExpansion(key, defaultExpanded: defaultExpanded)
         return Binding {
             isFiltering ? !collapsedSearchGroups.contains(key) : saved.wrappedValue
         } set: { expanded in
@@ -563,9 +573,10 @@ struct RepositoryWorkspace: View {
 
     private func referenceGroup(_ kind: RepositoryReference.Kind, badges: [GraphReferenceBadge],
                                 isFiltering: Bool) -> some View {
-        let isExpanded = referenceExpansion(kind.prefix, isFiltering: isFiltering)
-        return sidebarGroup(kind == .tag ? "Tags" : "Branches",
-                            kind.icon, count: badges.count, expanded: isExpanded, headerMenu: {
+        let isExpanded = referenceExpansion(kind.prefix, isFiltering: isFiltering, defaultExpanded: kind != .remote)
+        let icon = kind == .remote ? "cloud" : kind == .local ? "laptopcomputer" : kind.icon
+        return sidebarGroup(kind == .tag ? "Tags" : kind.label,
+                            icon, count: badges.count, expanded: isExpanded, headerMenu: {
             if kind == .tag {
                 Button("Create Tag…", systemImage: "tag", action: tagHead).disabled(!canTagHead)
             }
@@ -573,8 +584,9 @@ struct RepositoryWorkspace: View {
             if kind == .tag {
                 ForEach(badges) { badge in referenceLabel(badge) }
             } else {
-                let rows = SidebarBranchRow.visibleRows(badges, currentBranch: snapshot.repository.branch) { path in
-                    branchFolderExpansion(path, isFiltering: isFiltering).wrappedValue
+                let current = kind == .local ? snapshot.repository.branch : nil
+                let rows = SidebarBranchRow.visibleRows(badges, currentBranch: current) { path in
+                    branchFolderExpansion(path, kind: kind, isFiltering: isFiltering).wrappedValue
                 }
                 ForEach(rows) { row in
                     switch row {
@@ -582,45 +594,44 @@ struct RepositoryWorkspace: View {
                         referenceLabel(badge, displayName: name)
                             .padding(.leading, branchIndent(depth))
                     case .folder(let folder):
-                        branchFolderLabel(folder, isFiltering: isFiltering)
+                        branchFolderLabel(folder, kind: kind, isFiltering: isFiltering)
                     }
                 }
             }
         }
     }
 
-    private func branchFolderExpansion(_ path: String, isFiltering: Bool) -> Binding<Bool> {
-        referenceExpansion("branch-folder/" + path, isFiltering: isFiltering)
+    private func branchFolderExpansion(_ path: String, kind: RepositoryReference.Kind, isFiltering: Bool) -> Binding<Bool> {
+        referenceExpansion(SidebarBranchRow.folderKey(path, kind: kind), isFiltering: isFiltering)
     }
 
     private func branchIndent(_ depth: Int) -> CGFloat {
         CGFloat(min(depth, 5)) * 14
     }
 
-    private func branchFolderLabel(_ folder: SidebarBranchRow.Folder, isFiltering: Bool) -> some View {
-        let expanded = branchFolderExpansion(folder.path, isFiltering: isFiltering)
+    private func branchFolderLabel(_ folder: SidebarBranchRow.Folder, kind: RepositoryReference.Kind, isFiltering: Bool) -> some View {
+        let expanded = branchFolderExpansion(folder.path, kind: kind, isFiltering: isFiltering)
         let containsHiddenCurrent = folder.containsCurrentBranch && !expanded.wrappedValue
         return Button { expanded.wrappedValue.toggle() } label: {
             HStack(spacing: 6) {
                 Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right")
-                    .font(.caption2.weight(.semibold)).frame(width: 10)
-                Image(systemName: "folder").font(.caption)
-                Text(verbatim: folder.name).lineLimit(1)
+                    .font(.system(size: 8, weight: .semibold)).frame(width: 9).foregroundStyle(.tertiary)
+                Image(systemName: "folder").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(verbatim: folder.name).lineLimit(1).fontWeight(.medium)
                 Spacer(minLength: 2)
                 if containsHiddenCurrent {
-                    Text("Current").font(.caption2.weight(.bold)).fixedSize()
+                    Image(systemName: "checkmark.circle.fill").font(.caption)
+                        .accessibilityLabel("Contains checked-out branch")
                 }
-                Text(folder.count, format: .number).font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
             }
-            .foregroundStyle(containsHiddenCurrent ? snapshot.colors.currentBranchColor : .secondary)
+            .foregroundStyle(containsHiddenCurrent ? WorkspaceColors.accent : Color.primary.opacity(0.9))
             .padding(.horizontal, 8)
             .frame(height: 24)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .padding(.leading, branchIndent(folder.depth))
-        .accessibilityIdentifier("branch-folder-" + folder.path)
+        .accessibilityIdentifier((kind == .remote ? "remote-branch-folder-" : "branch-folder-") + folder.path)
         .accessibilityLabel(folder.name + ", " + String(folder.count))
         .accessibilityValue(expanded.wrappedValue ? "Expanded" : "Collapsed")
         .help(folder.path)
@@ -629,29 +640,34 @@ struct RepositoryWorkspace: View {
     private func referenceLabel(_ badge: GraphReferenceBadge, displayName: String? = nil) -> some View {
         let ref = badge.reference
         let isCurrent = snapshot.isCheckedOut(ref)
-        let selected = badge.references.contains { tab.selection == .reference($0.id) }
-        return HStack(spacing: 4) {
-            BranchLocationLabel(badge: badge, repository: tab.id, checkedOut: isCurrent, displayName: displayName,
-                                select: selectReference, checkout: checkout, drop: proposeDrop, menu: referenceActions)
-            if isCurrent {
-                Spacer(minLength: 2)
-                Text("Current")
-                    .font(.caption2.weight(.bold)).fixedSize()
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(snapshot.colors.currentBranchColor.opacity(0.16), in: Capsule())
-            }
+        let selected = tab.selection == .reference(ref.id)
+        let location = isCurrent ? "checked-out local branch" : ref.locationLabel
+        let surface = selected ? WorkspaceColors.selection : isCurrent ? WorkspaceColors.accent.opacity(0.13) : .clear
+        return HStack(spacing: 7) {
+            Image(systemName: ref.kind == .tag ? "tag" : "arrow.triangle.branch")
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 13)
+                .foregroundStyle(isCurrent ? WorkspaceColors.accent : .secondary)
+            Text(verbatim: displayName ?? badge.name)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+            if isCurrent { Image(systemName: "checkmark.circle.fill").foregroundStyle(WorkspaceColors.accent) }
         }
         .fontWeight(isCurrent ? .semibold : .regular)
-        .foregroundStyle(snapshot.colors.color(for: ref))
+        .foregroundStyle(.primary)
+        .padding(.leading, 14)
         .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 5)
-                .fill(selected ? WorkspaceColors.selection : .clear)
-                .modifier(BranchDragControl(reference: ref, repository: tab.id, onSelect: selectReference, onCheckout: checkout, onDrop: proposeDrop))
-                .contextMenu { referenceActions(ref) }
-                .accessibilityHidden(true)
-        }
+        .frame(maxWidth: .infinity, minHeight: 23, alignment: .leading)
+        .background(surface, in: RoundedRectangle(cornerRadius: 4))
+        .contentShape(Rectangle())
+        .modifier(BranchDragControl(reference: ref, repository: tab.id, onSelect: selectReference, onCheckout: checkout, onDrop: proposeDrop))
+        .contextMenu { referenceActions(ref) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(ref.name + ", " + location)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { selectReference(ref) }
+        .help(ref.name + " · " + location + " · " + ref.commitID.prefix(7))
     }
 
     private func selectReference(_ reference: RepositoryReference) {

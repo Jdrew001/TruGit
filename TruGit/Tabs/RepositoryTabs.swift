@@ -56,7 +56,9 @@ final class RepositoryTab: Identifiable {
         self.snapshot = snapshot
         let key = "sidebarSections.v1." + snapshot.repository.root.standardizedFileURL.path
         sidebarPreferencesKey = key
-        sidebarSections = UserDefaults.standard.dictionary(forKey: key) as? [String: Bool] ?? [:]
+        let saved = UserDefaults.standard.dictionary(forKey: key) as? [String: Bool] ?? [:]
+        sidebarSections = SidebarBranchRow.inheritRemoteExpansion(in: saved, badges: snapshot.sidebarReferences[.remote] ?? [])
+        if sidebarSections != saved { UserDefaults.standard.set(sidebarSections, forKey: key) }
         if snapshot.repository.integration != nil { showWorkInProgress() }
     }
 

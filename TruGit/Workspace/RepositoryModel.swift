@@ -7,6 +7,7 @@ struct RepositorySnapshot: Identifiable, Sendable {
     let repository: GitRepository
     let references: [RepositoryReference]
     let referenceBadges: [GraphReferenceBadge]
+    let sidebarReferences: [RepositoryReference.Kind: [GraphReferenceBadge]]
     let operationTitle: String?
     let worktrees: [GitWorktree]
     let remotes: [String]
@@ -83,6 +84,12 @@ struct RepositorySnapshot: Identifiable, Sendable {
         self.repository = repository
         self.references = references
         referenceBadges = GraphReferenceBadge.grouped(references, currentBranch: repository.branch, remoteNames: remotes)
+        let localAndTags = referenceBadges.filter { $0.reference.kind != .remote }
+        let remoteBranches = references.filter { $0.kind == .remote }.map { reference in
+            let name = reference.remoteTarget.map { $0.remote + "/" + $0.name } ?? reference.name
+            return GraphReferenceBadge(name: name, reference: reference, remotes: [])
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        sidebarReferences = Dictionary(grouping: localAndTags + remoteBranches, by: \.reference.kind)
         self.operationTitle = operationTitle
         colors = BranchColors(references: references, currentBranch: repository.branch)
     }

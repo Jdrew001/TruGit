@@ -38,6 +38,7 @@ final class RevisionTests: TruGitUITestCase {
         let ref = "peer/feature/nested"
         let tip = try repository.git("rev-parse", ref)
         launch()
+        clickVisible(app.buttons["Remote, 1"])
         context(ref, "Switch to " + ref)
         expectGit("feature/nested", ["branch", "--show-current"])
         XCTAssertEqual(try repository.git("rev-parse", "HEAD"), tip)
