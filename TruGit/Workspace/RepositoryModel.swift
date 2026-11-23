@@ -32,6 +32,29 @@ struct RepositorySnapshot: Identifiable, Sendable {
         return "Switch to " + branch.name
     }
 
+    func switchTitle(for reference: RepositoryReference) -> String? {
+        if let local = checkoutBranch(for: reference) { return checkoutTitle(for: local) }
+        return reference.kind == .remote ? "Switch to " + reference.name : nil
+    }
+
+    func newLocalName(for remote: RepositoryReference) -> String {
+        let preferred = remote.remoteTarget?.name ?? String(remote.name.split(separator: "/", maxSplits: 1).last ?? "")
+        let locals = references.filter { $0.kind == .local }
+        func available(_ name: String) -> Bool {
+            !locals.contains { $0.name == name || $0.name.hasPrefix(name + "/") || name.hasPrefix($0.name + "/") }
+        }
+        if available(preferred) { return preferred }
+        // Keep a branch tracking another remote intact when both remotes use the same name.
+        let base = remote.name.replacingOccurrences(of: "/", with: "-")
+        var candidate = base
+        var suffix = 2
+        while !available(candidate) {
+            candidate = base + "-" + String(suffix)
+            suffix += 1
+        }
+        return candidate
+    }
+
     func remoteBranch(for local: RepositoryReference) -> RepositoryReference? {
         guard local.kind == .local else { return nil }
         if let upstream = local.upstreamID { return references.first { $0.id == upstream && $0.kind == .remote } }

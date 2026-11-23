@@ -95,7 +95,7 @@ struct GraphBranchInspector: View {
                     .buttonStyle(.borderedProminent).disabled(!canAct)
             }
         } else if reference.kind == .remote {
-            Button("Create Tracking Branch…") { checkout(reference) }
+            Button("Switch to " + reference.name) { checkout(reference) }
                 .buttonStyle(.borderedProminent).disabled(!canAct)
         }
         if reference.kind == .local && reference.pushUpstream == nil {

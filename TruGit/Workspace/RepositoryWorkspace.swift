@@ -608,7 +608,8 @@ struct RepositoryWorkspace: View {
             if snapshot.isCheckedOut(local) { selectReference(local) }
             else { performBranchAction(.switchTo(local.name)) }
         } else if reference.kind == .remote {
-            nameBranch(.track(reference))
+            let name = snapshot.newLocalName(for: reference)
+            performBranchAction(reference.remoteTarget == nil ? .createAndSwitch(name: name, start: reference) : .track(name: name, remote: reference))
         }
     }
 
@@ -660,6 +661,10 @@ struct RepositoryWorkspace: View {
 
     @ViewBuilder
     private func referenceActions(_ reference: RepositoryReference) -> some View {
+        if let title = snapshot.switchTitle(for: reference) {
+            Button(title, systemImage: "arrow.triangle.branch") { checkout(reference) }
+                .disabled(!canMoveBranches || snapshot.checkoutBranch(for: reference).map(snapshot.isCheckedOut) == true)
+        }
         if reference.kind == .local {
             Button(reference.pushUpstream == nil ? "Publish Branch" : "Push Branch", systemImage: "arrow.up.to.line") {
                 requestPush(reference)
@@ -691,14 +696,6 @@ struct RepositoryWorkspace: View {
             }.disabled(!canMoveBranches)
         }
         Divider()
-        if let local = snapshot.checkoutBranch(for: reference) {
-            Button(snapshot.checkoutTitle(for: local), systemImage: "arrow.triangle.branch") { checkout(reference) }
-                .disabled(!canMoveBranches || snapshot.isCheckedOut(local))
-        } else if reference.kind == .remote {
-            Button("Create Tracking Branch…", systemImage: "arrow.triangle.branch") { checkout(reference) }
-                .disabled(!canMoveBranches)
-        }
-
         if reference.kind != .tag, let current, current.id != reference.id {
             Button("Rebase \(current.name) onto This Branch…", systemImage: "arrow.turn.up.right") {
                 showActions(RevisionPoint(current), target: RevisionPoint(reference), preferred: .rebase)
@@ -1019,7 +1016,7 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
                         }.frame(width: 8).offset(x: columns.refs - 4)
                     }
                 CommitTable(graph: graph, columns: columns, snapshot: snapshot, selection: $selection, jump: scrollRequest,
-                            deletionChoices: deletionChoices, requestDelete: requestDelete, openActions: openActions, openBatch: openBatch, createTag: createTag, canAct: canAct, onDrop: onDrop, expandedBadges: expandedBadges) { references in
+                            deletionChoices: deletionChoices, requestDelete: requestDelete, checkout: onCheckout, openActions: openActions, openBatch: openBatch, createTag: createTag, canAct: canAct, onDrop: onDrop, expandedBadges: expandedBadges) { references in
                     BranchBadges(groups: references, snapshot: snapshot, badge: referenceBadge, actions: referenceMenu)
                 }
                 if graph.rows.count == loadedMaximum {

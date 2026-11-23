@@ -30,6 +30,46 @@ final class RevisionTests: TruGitUITestCase {
         app.typeKey(.return, modifierFlags: [])
     }
 
+    func testSwitchToRemoteBranchCreatesTrackingBranchThenReusesIt() throws {
+        let remote = repository.root.appendingPathComponent(".git/peer.git")
+        try repository.git("init", "--bare", remote.path)
+        try repository.git("remote", "add", "peer", remote.path)
+        try repository.git("push", "peer", "HEAD:refs/heads/feature/nested")
+        let ref = "peer/feature/nested"
+        let tip = try repository.git("rev-parse", ref)
+        launch()
+        context(ref, "Switch to " + ref)
+        expectGit("feature/nested", ["branch", "--show-current"])
+        XCTAssertEqual(try repository.git("rev-parse", "HEAD"), tip)
+        XCTAssertEqual(try repository.git("rev-parse", "--abbrev-ref", "@{upstream}"), ref)
+
+        context("main", "Switch to main")
+        expectGit("main", ["branch", "--show-current"])
+        context(ref, "Switch to feature/nested")
+        expectGit("feature/nested", ["branch", "--show-current"])
+        XCTAssertEqual(try repository.git("branch", "--format=%(refname:short)"), "feature/nested\nmain")
+    }
+
+    func testGraphSwitchKeepsBranchTrackingAnotherRemoteIntact() throws {
+        for remote in ["origin", "peer"] {
+            let bare = repository.root.appendingPathComponent(".git/" + remote + ".git")
+            try repository.git("init", "--bare", bare.path)
+            try repository.git("remote", "add", remote, bare.path)
+            try repository.git("push", remote, "HEAD:refs/heads/topic")
+        }
+        try repository.git("branch", "--track", "topic", "origin/topic")
+        launch()
+        let row = app.tables.firstMatch.descendants(matching: .tableRow).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.5)).rightClick()
+        let item = app.menuItems["Switch to peer/topic"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.click()
+        expectGit("peer-topic", ["branch", "--show-current"])
+        XCTAssertEqual(try repository.git("rev-parse", "--abbrev-ref", "@{upstream}"), "peer/topic")
+        XCTAssertEqual(try repository.git("rev-parse", "--abbrev-ref", "topic@{upstream}"), "origin/topic")
+    }
+
     func testSwitchUndoRedoAndBranchFilter() throws {
         _ = try topicCommit()
         launch()

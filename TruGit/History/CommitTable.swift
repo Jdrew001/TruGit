@@ -50,6 +50,7 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
     let jump: CommitJump?
     let deletionChoices: (RepositoryReference) -> [BranchDeletion]
     let requestDelete: (BranchDeletion) -> Void
+    let checkout: (RepositoryReference) -> Void
     let openActions: (RevisionPoint, RevisionOperation?) -> Void
     let openBatch: (CommitBatch) -> Void
     let createTag: (RevisionPoint) -> Void
@@ -292,8 +293,12 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
             let destination = current ?? locals.first
             func addBranchShortcuts(_ ref: RepositoryReference) {
                 let branch = RevisionPoint(ref)
-                if ref.kind == .local, ref.id != current?.id {
-                    addAction("Switch to “" + ref.name + "”…", branch, .checkout, to: menu)
+                if let title = parent.snapshot.switchTitle(for: ref) {
+                    let item = NSMenuItem(title: title, action: #selector(switchBranch(_:)), keyEquivalent: "")
+                    item.target = self
+                    item.representedObject = ref
+                    item.isEnabled = parent.canAct && parent.snapshot.checkoutBranch(for: ref).map(parent.snapshot.isCheckedOut) != true
+                    menu.addItem(item)
                 }
                 if parent.snapshot.canMergeBranches(from: ref) {
                     addAction("Merge “" + ref.name + "” into…", branch, .merge, to: menu)
@@ -350,6 +355,11 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
                 menu.addItem(item)
             }
             return menu
+        }
+
+        @objc private func switchBranch(_ item: NSMenuItem) {
+            guard let ref = item.representedObject as? RepositoryReference else { return }
+            parent.checkout(ref)
         }
 
         @objc private func createTag(_ item: NSMenuItem) {
