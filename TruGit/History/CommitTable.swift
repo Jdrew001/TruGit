@@ -618,10 +618,12 @@ private final class CommitCell: NSTableCellView {
         date.isHidden = c.date == 0
     }
 
+    private var graphStep: CGFloat {
+        min(23, max(0, columns.graph - HistoryGraphStroke.laneInset * 2) / CGFloat(max(1, lanes - 1)))
+    }
+
     private func graphX(lane: Int) -> CGFloat {
-        let inset = HistoryGraphStroke.laneInset
-        let step = min(23, max(0, columns.graph - inset * 2) / CGFloat(max(1, lanes - 1)))
-        return columns.refs + inset + CGFloat(lane) * step
+        columns.refs + HistoryGraphStroke.laneInset + CGFloat(lane) * graphStep
     }
 
     func hoverAnchor(at location: NSPoint) -> NSRect? {
@@ -638,12 +640,14 @@ private final class CommitCell: NSTableCellView {
             CGPoint(x: graphX(lane: lane), y: bounds.height * height)
         }
         let center = point(row.column, 0.5)
+        let scale = min(1, max(0.35, graphStep / 14))
+        let strokeWidth = HistoryGraphStroke.width * max(0.62, scale)
 
         cg.saveGState()
         defer { cg.restoreGState() }
         cg.setShouldAntialias(true)
         cg.setLineJoin(.round)
-        cg.setLineWidth(HistoryGraphStroke.width)
+        cg.setLineWidth(strokeWidth)
         for segment in row.segments {
             let start = point(segment.fromLane, segment.fromHeight)
             let end = point(segment.toLane, segment.toHeight)
@@ -656,24 +660,24 @@ private final class CommitCell: NSTableCellView {
             cg.strokePath()
         }
 
-        drawNode(row, at: center, in: cg)
+        drawNode(row, at: center, scale: scale, strokeWidth: strokeWidth, in: cg)
     }
 
-    private func drawNode(_ row: CommitGraph.Row, at center: CGPoint, in cg: CGContext) {
+    private func drawNode(_ row: CommitGraph.Row, at center: CGPoint, scale: CGFloat, strokeWidth: CGFloat, in cg: CGContext) {
         let tint = BranchColors.native(row.color).cgColor
         let surface = NSColor(WorkspaceColors.history).cgColor
-        let dot = CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8)
+        let dot = CGRect(x: center.x - 4 * scale, y: center.y - 4 * scale, width: 8 * scale, height: 8 * scale)
         cg.setLineDash(phase: 0, lengths: [])
         if head {
-            let ring = dot.insetBy(dx: -3.5, dy: -3.5)
+            let ring = dot.insetBy(dx: -3.5 * scale, dy: -3.5 * scale)
             cg.setFillColor(surface)
             cg.fillEllipse(in: ring)
             cg.setStrokeColor(tint)
-            cg.setLineWidth(1.4)
+            cg.setLineWidth(1.4 * max(0.62, scale))
             cg.strokeEllipse(in: ring)
         }
         if row.commit.parents.count > 1 {
-            let radius: CGFloat = 5.25
+            let radius = 5.25 * scale
             cg.move(to: CGPoint(x: center.x, y: center.y - radius))
             cg.addLine(to: CGPoint(x: center.x + radius, y: center.y))
             cg.addLine(to: CGPoint(x: center.x, y: center.y + radius))
@@ -681,7 +685,7 @@ private final class CommitCell: NSTableCellView {
             cg.closePath()
             cg.setFillColor(surface)
             cg.setStrokeColor(tint)
-            cg.setLineWidth(HistoryGraphStroke.width)
+            cg.setLineWidth(strokeWidth)
             cg.drawPath(using: .fillStroke)
         } else {
             cg.setFillColor(tint)

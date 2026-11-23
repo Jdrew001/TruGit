@@ -66,6 +66,8 @@ struct FeedbackView: View {
                     .foregroundStyle(.secondary)
                 if account.client != nil {
                     form
+                } else if account.restoration != .resolved {
+                    GitHubConnectionStatus()
                 } else if account.busy {
                     ProgressView("Connecting to GitHub…").controlSize(.small)
                 } else {
@@ -80,7 +82,7 @@ struct FeedbackView: View {
         .tint(PullStyle.mint)
         .background(PullStyle.canvas)
         .interactiveDismissDisabled(submitting)
-        .task { await account.restore() }
+        .task { account.restore() }
     }
 
     private var form: some View {

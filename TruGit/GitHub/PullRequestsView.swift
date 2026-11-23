@@ -51,15 +51,17 @@ struct PullRequestsView: View {
                         ContentUnavailableView("No GitHub Remote", systemImage: "network",
                                                description: Text("Add a github.com remote to this local repository to view its pull requests."))
                     }
-                } else {
+                } else if account.restoration == .resolved && !account.hasStoredToken {
                     ScrollView {
                         GitHubAccountView().frame(maxWidth: .infinity).padding(.vertical, 32)
                     }
+                } else {
+                    GitHubConnectionStatus()
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(PullStyle.canvas)
-        .task { await account.restore() }
+        .task { account.restore() }
         .task(id: Discovery(remotes: remotes, attempt: discoveryAttempt)) {
             discovering = true
             discoveryError = nil

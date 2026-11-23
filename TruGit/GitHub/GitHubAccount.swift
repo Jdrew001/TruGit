@@ -47,32 +47,60 @@ private actor GitHubKeychain {
 
 @MainActor @Observable
 final class GitHubAccount {
+    enum Restoration { case checking, resolved, failed }
+
     private(set) var client: GitHubAPI?
     private(set) var login = ""
     private(set) var generation = UUID()
     private(set) var busy = false
     private(set) var error: String?
     private(set) var hasStoredToken = false
-    private var restored = false
+    private(set) var restoration = Restoration.checking
 
-    func restore() async {
-        guard !restored, !busy else { return }
-        restored = true
-        #if TRUGIT_E2E
-        client = GitHubFixtureProtocol.api()
-        login = ProcessInfo.processInfo.environment["TRUGIT_FIXTURE_LOGIN"] ?? "reviewer"
-        return
-        #else
+    func restore() {
+        guard restoration == .checking, !busy else { return }
         busy = true
+        error = nil
+        // The shared account finishes restoring even if the initiating view goes away.
+        Task { [weak self] in await self?.restoreSavedConnection() }
+    }
+
+    func retryRestore() {
+        guard restoration == .failed, !busy else { return }
+        restoration = .checking
+        restore()
+    }
+
+    private func restoreSavedConnection() async {
         defer { busy = false }
         do {
-            guard let token = try await GitHubKeychain.shared.read() else { return }
+            #if TRUGIT_E2E
+            let environment = ProcessInfo.processInfo.environment
+            let fixture = environment["TRUGIT_FIXTURE_ACCOUNT_RESTORE"]
+            guard fixture != "missing" else {
+                restoration = .resolved
+                return
+            }
+            hasStoredToken = true
+            let api = GitHubFixtureProtocol.api()
+            if fixture == "validate" {
+                let user = try await api.user()
+                setConnected(api, login: user.login)
+            } else {
+                setConnected(api, login: environment["TRUGIT_FIXTURE_LOGIN"] ?? "reviewer")
+            }
+            #else
+            guard let token = try await GitHubKeychain.shared.read() else {
+                restoration = .resolved
+                return
+            }
             hasStoredToken = true
             try await authenticate(token, save: false)
+            #endif
         } catch {
-            if Task.isCancelled { restored = false } else { self.error = error.localizedDescription }
+            self.error = error.localizedDescription
+            restoration = .failed
         }
-        #endif
     }
 
     func connect(_ token: String) async {
@@ -88,12 +116,16 @@ final class GitHubAccount {
         let user = try await api.user()
         try Task.checkCancellation()
         if save { try await GitHubKeychain.shared.save(token) }
+        setConnected(api, login: user.login)
+    }
+
+    private func setConnected(_ api: GitHubAPI, login: String) {
         hasStoredToken = true
-        restored = true
         client = api
-        login = user.login
+        self.login = login
         generation = UUID()
         error = nil
+        restoration = .resolved
     }
 
     func disconnect() async {
@@ -107,27 +139,110 @@ final class GitHubAccount {
             login = ""
             generation = UUID()
             error = nil
+            restoration = .resolved
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct GitHubConnectionStatus: View {
+    @Environment(GitHubAccount.self) private var account
+
+    var body: some View {
+        if account.restoration == .failed {
+            VStack(alignment: .leading, spacing: 9) {
+                Label("Couldn’t restore GitHub connection", systemImage: "exclamationmark.circle")
+                    .font(.headline)
+                if let error = account.error {
+                    Text(error).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                Button("Retry connection", action: account.retryRestore)
+            }
+            .padding(18)
+        } else {
+            ProgressView("Checking GitHub connection…")
+                .accessibilityIdentifier("github-connection-checking")
+        }
     }
 }
 
 struct GitHubAccountView: View {
     @Environment(GitHubAccount.self) private var account
     @State private var token = ""
+    @State private var editingToken = false
+
+    private var showsTokenEditor: Bool {
+        editingToken || (account.restoration == .resolved && !account.hasStoredToken && account.client == nil)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                Image(systemName: account.client == nil ? "key.fill" : "person.crop.circle.badge.checkmark")
-                    .font(.system(size: 21)).foregroundStyle(PullStyle.mint).frame(width: 42, height: 42)
-                    .background(PullStyle.mint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(account.client == nil ? "Connect to GitHub" : "GitHub account").font(.title2.bold())
-                    Text(account.client == nil ? "Create and review pull requests from TruGit." : "Connected as @" + account.login)
-                        .font(.callout).foregroundStyle(.secondary)
+            if account.restoration == .checking {
+                GitHubConnectionStatus().frame(maxWidth: .infinity)
+            } else {
+                accountHeader
+                Divider()
+                accountControls
+            }
+        }
+        .padding(22).frame(width: 440).background(PullStyle.rail, in: RoundedRectangle(cornerRadius: 10))
+        .preferredColorScheme(.dark)
+        .task { account.restore() }
+    }
+
+    private var accountHeader: some View {
+        HStack(spacing: 12) {
+            Image(systemName: account.client == nil ? "key.fill" : "person.crop.circle.badge.checkmark")
+                .font(.system(size: 21)).foregroundStyle(PullStyle.mint).frame(width: 42, height: 42)
+                .background(PullStyle.mint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(showsTokenEditor && !account.hasStoredToken ? "Connect to GitHub" : "GitHub account")
+                    .font(.title2.bold())
+                Text(account.client == nil ? "Create and review pull requests from TruGit." : "Connected as @" + account.login)
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var accountControls: some View {
+        if showsTokenEditor {
+            tokenEditor
+        } else if account.restoration == .failed {
+            GitHubConnectionStatus()
+        } else {
+            Label("Token saved in your macOS Keychain", systemImage: "lock")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        if let error = account.error, showsTokenEditor || account.restoration == .resolved {
+            Text(error).foregroundStyle(PullStyle.amber).textSelection(.enabled)
+        }
+        HStack {
+            if account.hasStoredToken {
+                Button("Disconnect") {
+                    clearEditor()
+                    Task { await account.disconnect() }
                 }
             }
-            Divider()
+            Spacer()
+            if account.busy { ProgressView().controlSize(.small) }
+            if showsTokenEditor {
+                if editingToken { Button("Cancel", action: clearEditor) }
+                Button(account.hasStoredToken ? "Save token" : "Connect") {
+                    Task {
+                        await account.connect(token)
+                        if account.error == nil { clearEditor() }
+                    }
+                }
+                .buttonStyle(PullPrimaryButton())
+                .disabled(token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } else {
+                Button("Replace token…") { editingToken = true }
+            }
+        }.disabled(account.busy)
+    }
+
+    private var tokenEditor: some View {
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 7) {
                 HStack {
                     Text("Personal access token").font(.callout.weight(.semibold))
@@ -145,23 +260,11 @@ struct GitHubAccountView: View {
                 HStack { Text("Pull requests"); Spacer(); Text("Read and write").foregroundStyle(.secondary) }
                 HStack { Text("Contents"); Spacer(); Text("Read").foregroundStyle(.secondary) }
             }.font(.callout).padding(12).pullCard()
-            if let error = account.error { Text(error).foregroundStyle(PullStyle.amber).textSelection(.enabled) }
-            HStack {
-                if account.hasStoredToken { Button("Disconnect") { token = ""; Task { await account.disconnect() } } }
-                Spacer()
-                if account.busy { ProgressView().controlSize(.small) }
-                Button(account.client == nil ? "Connect" : "Replace token") {
-                    Task {
-                        await account.connect(token)
-                        if account.error == nil { token = "" }
-                    }
-                }
-                .buttonStyle(PullPrimaryButton())
-                .disabled(token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }.disabled(account.busy)
         }
-        .padding(22).frame(width: 440).background(PullStyle.rail, in: RoundedRectangle(cornerRadius: 10))
-        .preferredColorScheme(.dark)
-        .task { await account.restore() }
+    }
+
+    private func clearEditor() {
+        editingToken = false
+        token = ""
     }
 }

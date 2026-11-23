@@ -20,6 +20,42 @@ final class HostedReviewTests: TruGitUITestCase {
         expectText("0 of 3 reviewed")
     }
 
+    func testRelaunchRestoresSavedGitHubConnectionWithoutTokenPrompt() throws {
+        app.launchEnvironment["TRUGIT_FIXTURE_ACCOUNT_RESTORE"] = "validate"
+        try writePages { _ in ["/user||1": ["body": ["login": "reviewer"]]] }
+        openPR()
+        app.terminate()
+
+        try writePages { _ in ["/user||1": ["body": ["login": "reviewer"], "delayMilliseconds": 4_500]] }
+        launch()
+        clickVisible(app.buttons["Pull Requests"])
+        let checking = app.descendants(matching: .any).matching(identifier: "github-connection-checking").firstMatch
+        XCTAssertTrue(checking.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.secureTextFields["Personal access token"].exists)
+        expectText("0 of 3 reviewed")
+        XCTAssertFalse(app.secureTextFields["Personal access token"].exists)
+    }
+
+    func testFailedSavedConnectionCanRetryWithoutRequestingTokenAgain() throws {
+        app.launchEnvironment["TRUGIT_FIXTURE_ACCOUNT_RESTORE"] = "validate"
+        try writePages { _ in ["/user||1": ["status": 503, "body": ["message": "Temporarily unavailable"]]] }
+        launch()
+        clickVisible(app.buttons["Pull Requests"])
+        expectText("Couldn’t restore GitHub connection")
+        XCTAssertFalse(app.secureTextFields["Personal access token"].exists)
+
+        try writePages { _ in ["/user||1": ["body": ["login": "reviewer"]]] }
+        clickVisible(app.buttons["Retry connection"])
+        expectText("0 of 3 reviewed")
+    }
+
+    func testMissingSavedTokenOffersConnectionForm() {
+        app.launchEnvironment["TRUGIT_FIXTURE_ACCOUNT_RESTORE"] = "missing"
+        launch()
+        clickVisible(app.buttons["Pull Requests"])
+        XCTAssertTrue(app.secureTextFields["Personal access token"].waitForExistence(timeout: 8))
+    }
+
     private func checkRequest(_ suffix: String, method: String = "POST", fields: [String: String]) throws {
         let written = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             FileManager.default.fileExists(atPath: self.receipt.path)

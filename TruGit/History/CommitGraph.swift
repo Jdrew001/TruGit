@@ -106,7 +106,8 @@ struct CommitGraph: Sendable {
 }
 
 private struct GraphLayout {
-    private var lanes: [CommitGraph.Lane] = []
+    // Empty slots are reusable. Removing a lane must never move the lanes beside it.
+    private var lanes: [CommitGraph.Lane?] = []
     private var nextColor = 0
     private(set) var maximumLanes = 1
 
@@ -121,40 +122,48 @@ private struct GraphLayout {
     }
 
     mutating func add(_ commit: GitCommit) -> CommitGraph.Row {
-        let incoming = lanes
-        let existing = lanes.firstIndex { $0.target == commit.id }
-        let column = existing ?? lanes.count
-        let incomingColor = existing.map { lanes.remove(at: $0).color }
+        let existing = lanes.firstIndex { $0?.target == commit.id }
+        let column = existing ?? availableColumn(near: 0)
+        let incomingColor = existing.flatMap { lanes[$0]?.color }
         let color = tipColors[commit.id] ?? incomingColor ?? allocateColor()
 
-        var insertionIndex = column
-        for (index, parent) in commit.parents.enumerated() {
-            guard !lanes.contains(where: { $0.target == parent }) else { continue }
-            let parentColor = index == 0 ? color : (tipColors[parent] ?? allocateColor(avoiding: color))
-            lanes.insert(.init(target: parent, color: parentColor), at: insertionIndex)
-            insertionIndex += 1
+        var segments = lanes.enumerated().compactMap { index, lane -> CommitGraph.Segment? in
+            guard let lane else { return nil }
+            return .init(fromLane: index, toLane: index, fromHeight: 0, toHeight: lane.target == commit.id ? 0.5 : 1,
+                         color: lane.color, isWorkingTree: lane.isWorkingTree)
         }
+        if let existing { lanes[existing] = nil }
 
-        let outgoing = Dictionary(uniqueKeysWithValues: lanes.enumerated().map { ($1.target, $0) })
-        var segments = incoming.enumerated().compactMap { index, lane -> CommitGraph.Segment? in
-            if lane.target == commit.id {
-                return .init(fromLane: index, toLane: column, fromHeight: 0, toHeight: 0.5, color: lane.color, isWorkingTree: lane.isWorkingTree)
-            }
-            guard let destination = outgoing[lane.target] else { return nil }
-            return .init(fromLane: index, toLane: destination, fromHeight: 0, toHeight: 1, color: lane.color, isWorkingTree: lane.isWorkingTree)
-        }
-        segments += commit.parents.enumerated().compactMap { index, parent in
-            guard let destination = outgoing[parent] else { return nil }
-            return .init(fromLane: column, toLane: destination, fromHeight: 0.5, toHeight: 1,
-                         color: index == 0 ? color : lanes[destination].color)
+        for (index, parent) in commit.parents.enumerated() {
+            let destination = follow(parent, from: column, continuing: index == 0, color: color)
+            segments.append(.init(fromLane: column, toLane: destination.column, fromHeight: 0.5, toHeight: 1,
+                                  color: destination.color))
         }
 
         maximumLanes = max(maximumLanes, column + 1, lanes.count)
         return .init(commit: commit, column: column, color: color, segments: segments)
     }
 
+    private mutating func follow(_ parent: String, from column: Int, continuing: Bool, color: Int) -> (column: Int, color: Int) {
+        if let existing = lanes.firstIndex(where: { $0?.target == parent }), let lane = lanes[existing] {
+            return (existing, lane.color)
+        }
+        let position = availableColumn(near: continuing ? column : column + 1)
+        let parentColor = continuing ? color : (tipColors[parent] ?? allocateColor(avoiding: color))
+        let lane = CommitGraph.Lane(target: parent, color: parentColor)
+        if position == lanes.count { lanes.append(lane) }
+        else { lanes[position] = lane }
+        return (position, parentColor)
+    }
+
+    private func availableColumn(near preferred: Int) -> Int {
+        lanes.indices.lazy.filter { lanes[$0] == nil }.min {
+            (abs($0 - preferred), -$0) < (abs($1 - preferred), -$1)
+        } ?? lanes.count
+    }
+
     private mutating func allocateColor(avoiding adjacent: Int? = nil) -> Int {
-        let used = Set(lanes.map(\.color))
+        let used = Set(lanes.compactMap { $0?.color })
         while used.contains(nextColor) || nextColor == adjacent { nextColor += 1 }
         defer { nextColor += 1 }
         return nextColor

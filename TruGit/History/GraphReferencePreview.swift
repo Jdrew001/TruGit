@@ -70,7 +70,7 @@ final class GraphReferencePreview {
 
         pendingCommit = id
         pending = Task { [weak self, weak table] in
-            do { try await Task.sleep(for: .milliseconds(150)) }
+            do { try await Task.sleep(for: .milliseconds(80)) }
             catch { return }
             guard !Task.isCancelled, let self else { return }
             self.pending = nil
