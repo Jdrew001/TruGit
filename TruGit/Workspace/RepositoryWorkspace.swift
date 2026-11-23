@@ -947,7 +947,13 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
 
     @AppStorage("historyInspectorWidth") private var savedInspectorWidth: Double = 0
     @AppStorage("historyBranchTagWidth") private var branchTagWidth: Double = 0
-    @State private var draggingBranchTag: CGFloat?
+    @AppStorage("historyGraphWidth") private var graphWidth: Double = 0
+    @AppStorage("historyCommitMessageWidth") private var messageWidth: Double = 0
+    @AppStorage("historyAuthorWidth") private var authorWidth: Double = 0
+    @AppStorage("historyCommitDateWidth") private var dateWidth: Double = 0
+    @State private var resizingColumn: (column: HistoryColumn, width: CGFloat)?
+    @State private var graphOffset: CGFloat = 0
+    @State private var historyOffset: CGFloat = 0
     @State private var dragWidth: Double?
     @State private var graph: CommitGraph?
     @State private var maximum = GitHistory.pageSize
@@ -1077,20 +1083,16 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
 
     private func commitList(_ graph: CommitGraph) -> some View {
         GeometryReader { geo in
-            let columns = HistoryColumns(width: geo.size.width, lanes: graph.laneCount,
-                                         preferredRefs: draggingBranchTag ?? branchTagWidth)
+            let viewportWidth = geo.size.width
+            let columns = HistoryColumns(width: viewportWidth, lanes: graph.laneCount,
+                                         preferred: preferredHistoryWidths)
             VStack(spacing: 0) {
-                HistoryColumnHeader(columns: columns)
-                    .overlay(alignment: .leading) {
-                        WidthDivider(label: "Branch / Tag column width", width: columns.refs, limits: columns.refLimits) { value, finished in
-                            if finished { branchTagWidth = value; draggingBranchTag = nil }
-                            else { draggingBranchTag = value }
-                        }.frame(width: 8).offset(x: columns.refs - 4)
-                    }
-                CommitTable(graph: graph, columns: columns, snapshot: snapshot, selection: $selection, jump: scrollRequest,
-                            deletionChoices: deletionChoices, requestDelete: requestDelete, checkout: onCheckout, openActions: openActions, openBatch: openBatch, createTag: createTag, canAct: canAct, onDrop: onDrop, expandedBadges: expandedBadges) { references, colorIndex in
-                    BranchBadges(groups: references, snapshot: snapshot, tint: Color(nsColor: BranchColors.graph(colorIndex)),
-                                 badge: referenceBadge, actions: referenceMenu)
+                alignedHistoryColumns(HistoryColumnHeader(columns: columns, resize: resizeHistoryColumn),
+                                      columns: columns, viewportWidth: viewportWidth)
+                historyTable(graph, columns: columns, viewportWidth: viewportWidth)
+                if columns.graphScrollLimit > 0 {
+                    alignedHistoryColumns(HistoryGraphFooter(columns: columns, graphOffset: $graphOffset),
+                                          columns: columns, viewportWidth: viewportWidth)
                 }
                 if graph.rows.count == loadedMaximum {
                     Button(loadedMaximum == maximum ? "Load Older Commits" : "Loading Older Commits…") {
@@ -1102,8 +1104,55 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
                     .padding(6)
                 }
             }
+            .onChange(of: columns.graphScrollLimit) {
+                graphOffset = columns.clampGraphOffset(graphOffset)
+            }
         }
+        .onDisappear { historyOffset = 0 }
         .background(WorkspaceColors.history)
+    }
+
+    private func alignedHistoryColumns(_ view: some View, columns: HistoryColumns, viewportWidth: CGFloat) -> some View {
+        view
+            .frame(width: max(viewportWidth, columns.totalWidth))
+            .offset(x: -historyOffset)
+            .frame(width: viewportWidth, alignment: .leading)
+            .contentShape(Rectangle())
+            .clipped()
+    }
+
+    private func historyTable(_ graph: CommitGraph, columns: HistoryColumns, viewportWidth: CGFloat) -> some View {
+        CommitTable(graph: graph, columns: columns, viewportWidth: viewportWidth, graphOffset: $graphOffset,
+                    historyScrolled: { historyOffset = $0 }, snapshot: snapshot, selection: $selection, jump: scrollRequest,
+                    deletionChoices: deletionChoices, requestDelete: requestDelete, checkout: onCheckout,
+                    openActions: openActions, openBatch: openBatch, createTag: createTag, canAct: canAct,
+                    onDrop: onDrop, expandedBadges: expandedBadges) { references, colorIndex in
+            BranchBadges(groups: references, snapshot: snapshot, tint: Color(nsColor: BranchColors.graph(colorIndex)),
+                         badge: referenceBadge, actions: referenceMenu)
+        }
+    }
+
+    private var preferredHistoryWidths: [HistoryColumn: CGFloat] {
+        var widths: [HistoryColumn: CGFloat] = [
+            .refs: branchTagWidth, .graph: graphWidth, .message: messageWidth, .author: authorWidth, .date: dateWidth
+        ]
+        if let resizingColumn { widths[resizingColumn.column] = resizingColumn.width }
+        return widths
+    }
+
+    private func resizeHistoryColumn(_ column: HistoryColumn, width: CGFloat, finished: Bool) {
+        guard finished else {
+            resizingColumn = (column, width)
+            return
+        }
+        switch column {
+        case .refs: branchTagWidth = width
+        case .graph: graphWidth = width
+        case .message: messageWidth = width
+        case .author: authorWidth = width
+        case .date: dateWidth = width
+        }
+        resizingColumn = nil
     }
 
     private func locationLabel(_ badge: GraphReferenceBadge) -> some View {

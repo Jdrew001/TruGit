@@ -1,6 +1,31 @@
 import XCTest
 
 final class HistoryTests: TruGitUITestCase {
+    func testGraphScrollsWithoutShiftingNeighboringColumns() throws {
+        let tree = try repository.git("rev-parse", "HEAD^{tree}")
+        let base = try repository.git("rev-parse", "HEAD")
+        let parents = try (1...12).map { index in
+            try repository.git("commit-tree", tree, "-p", base, "-m", "Parallel change \(index)")
+        }
+        let merge = try repository.runGit(["commit-tree", tree, "-m", "Dense graph"] + parents.flatMap { ["-p", $0] })
+        try repository.git("update-ref", "refs/heads/main", merge)
+        app.launchArguments += ["-historyGraphWidth", "54"]
+        launch()
+
+        let scroller = app.scrollBars["Scroll graph horizontally"].firstMatch
+        XCTAssertTrue(scroller.waitForExistence(timeout: 5))
+        let messageHeader = app.splitters["Commit message column width"]
+        XCTAssertTrue(messageHeader.exists)
+        let commit = app.staticTexts["Parallel change 1"].firstMatch
+        XCTAssertTrue(commit.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(scroller.frame.minY, commit.frame.maxY)
+        let messageX = messageHeader.frame.midX
+        scroller.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).click()
+        let value = try XCTUnwrap((scroller.value as? NSNumber)?.doubleValue)
+        XCTAssertGreaterThan(value, 0)
+        XCTAssertEqual(messageHeader.frame.midX, messageX, accuracy: 1)
+    }
+
     func testViewAllFilesLoadsUnchangedContentFromSelectedCommit() throws {
         try repository.write("guide.txt", "Published instructions")
         try repository.git("add", ".")

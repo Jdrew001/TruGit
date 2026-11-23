@@ -3,14 +3,16 @@ import SwiftUI
 
 /// Only the painted thumb is narrow. AppKit keeps its normal hit area and
 /// handles track clicks, drags, momentum, and overlay fading.
-private final class WorkspaceScroller: NSScroller {
+class WorkspaceScroller: NSScroller {
     override class var isCompatibleWithOverlayScrollers: Bool { true }
+    var thumbThickness: CGFloat = 4
 
     override func drawKnob() {
         let native = rect(for: .knob)
         guard !native.isEmpty else { return }
         let vertical = bounds.height > bounds.width
-        let width: CGFloat = 4
+        let contrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        let width = contrast ? max(3, thumbThickness) : thumbThickness
         var thumb = native
         if vertical {
             thumb.origin.x = (native.midX - width / 2).rounded()
@@ -19,7 +21,6 @@ private final class WorkspaceScroller: NSScroller {
             thumb.origin.y = (native.midY - width / 2).rounded()
             thumb.size.height = width
         }
-        let contrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         NSColor(calibratedWhite: contrast ? 0.84 : 0.58, alpha: 1).setFill()
         NSBezierPath(roundedRect: thumb, xRadius: width / 2, yRadius: width / 2).fill()
     }

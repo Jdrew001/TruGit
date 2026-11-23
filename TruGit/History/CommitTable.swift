@@ -3,10 +3,19 @@ import SwiftUI
 
 private enum HistoryGraphStroke {
     static let laneInset: CGFloat = 14
+    static let trailingLaneInset: CGFloat = 18
     static let laneSpacing: CGFloat = 25
     static let width: CGFloat = 2
     static let dash: [CGFloat] = [2, 3]
     static let workingTree = NSColor.systemTeal.withAlphaComponent(0.86)
+
+    static func visibleMarkerX(_ laneX: CGFloat, in graph: CGRect) -> CGFloat {
+        min(graph.maxX - trailingLaneInset, max(graph.minX + laneInset, laneX))
+    }
+
+    static func accentRect(in graph: CGRect) -> CGRect {
+        CGRect(x: graph.maxX - 4, y: graph.minY + 3, width: 2, height: max(0, graph.height - 6))
+    }
 
     static func addConnection(from start: CGPoint, to end: CGPoint, joining: Bool, in cg: CGContext) {
         cg.move(to: start)
@@ -27,51 +36,174 @@ private enum HistoryGraphStroke {
     }
 }
 
-struct HistoryColumns: Equatable {
-    let refLimits: ClosedRange<CGFloat>
-    let refs: CGFloat
-    let graph: CGFloat
-    let message: CGFloat
-    let author: CGFloat
-    let date: CGFloat
+enum HistoryColumn: CaseIterable {
+    case refs, graph, message, author, date
 
-    init(width: CGFloat, lanes: Int, preferredRefs: CGFloat) {
-        let automatic = min(216, max(72, width * 0.24))
-        let lanesWidth = HistoryGraphStroke.laneInset * 2 + CGFloat(max(0, lanes - 1)) * HistoryGraphStroke.laneSpacing
-        graph = min(width * 0.25, max(min(254, width * 0.12), min(254, lanesWidth)))
-        refLimits = 54...max(54, width - graph - min(160, width * 0.35))
-        refs = min(refLimits.upperBound, max(refLimits.lowerBound, preferredRefs > 0 ? preferredRefs : automatic))
-        let available = width - max(0, refs - automatic)
-        author = available >= 560 ? min(192, available * 0.16) : 0
-        date = available >= 710 ? min(164, available * 0.17) : 0
-        message = min(450, max(0, width - refs - graph - author - date))
+    var title: String {
+        switch self {
+        case .refs: "Branch / Tag"
+        case .graph: "Graph"
+        case .message: "Commit message"
+        case .author: "Author"
+        case .date: "Commit date / time"
+        }
     }
+
+    var limits: ClosedRange<CGFloat> {
+        switch self {
+        case .refs: 54...680
+        case .graph: 54...680
+        case .message: 120...1200
+        case .author: 68...420
+        case .date: 92...420
+        }
+    }
+
+    func width(_ proposed: CGFloat) -> CGFloat {
+        min(limits.upperBound, max(limits.lowerBound, proposed))
+    }
+}
+
+struct HistoryColumns: Equatable {
+    private let widths: [HistoryColumn: CGFloat]
+    private let lanesWidth: CGFloat
+    let totalWidth: CGFloat
+
+    init(width: CGFloat, lanes: Int, preferred: [HistoryColumn: CGFloat] = [:]) {
+        let lanesWidth = HistoryGraphStroke.laneInset + HistoryGraphStroke.trailingLaneInset
+            + CGFloat(max(0, lanes - 1)) * HistoryGraphStroke.laneSpacing
+        self.lanesWidth = lanesWidth
+        let refs = min(216, max(72, width * 0.24))
+        let graph = HistoryColumn.graph.width(min(width * 0.25, max(width * 0.12, min(254, lanesWidth))))
+        let author = HistoryColumn.author.width(min(192, width * 0.16))
+        let date = HistoryColumn.date.width(min(164, width * 0.17))
+        let automatic: [HistoryColumn: CGFloat] = [
+            .refs: refs, .graph: graph, .message: min(450, width - refs - graph - author - date),
+            .author: author, .date: date
+        ]
+        let widths: [HistoryColumn: CGFloat] = HistoryColumn.allCases.reduce(into: [:]) { widths, column in
+            let savedWidth = preferred[column] ?? 0
+            widths[column] = column.width(savedWidth > 0 ? savedWidth : automatic[column, default: 0])
+        }
+        self.widths = widths
+        totalWidth = HistoryColumn.allCases.reduce(0) { $0 + widths[$1, default: 0] }
+    }
+
+    subscript(_ column: HistoryColumn) -> CGFloat { widths[column] ?? column.limits.lowerBound }
+    var refs: CGFloat { self[.refs] }
+    var graph: CGFloat { self[.graph] }
+    var message: CGFloat { self[.message] }
+    var author: CGFloat { self[.author] }
+    var date: CGFloat { self[.date] }
+    var graphScrollLimit: CGFloat { max(0, lanesWidth - graph) }
+
+    func clampGraphOffset(_ offset: CGFloat) -> CGFloat { min(graphScrollLimit, max(0, offset)) }
 }
 
 struct HistoryColumnHeader: View {
     let columns: HistoryColumns
+    let resize: (HistoryColumn, CGFloat, Bool) -> Void
+
     var body: some View {
         HStack(spacing: 0) {
-            heading("Branch / Tag", columns.refs)
-            heading("Graph", columns.graph)
-            heading("Commit message", columns.message)
-            if columns.author > 0 { heading("Author", columns.author) }
-            if columns.date > 0 { heading("Commit date / time", columns.date) }
+            ForEach(HistoryColumn.allCases, id: \.self) { column in
+                heading(column)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading).frame(height: 24).background(WorkspaceColors.sidebar)
     }
 
-    private func heading(_ name: String, _ width: CGFloat) -> some View {
-        Text(name.uppercased()).font(.system(size: 9, weight: .semibold, design: .monospaced))
+    private func heading(_ column: HistoryColumn) -> some View {
+        Text(column.title.uppercased()).font(.system(size: 9, weight: .semibold, design: .monospaced))
             .lineLimit(1).foregroundStyle(.secondary).padding(.leading, 6)
-            .frame(width: width, alignment: .leading).clipped()
-            .overlay(alignment: .trailing) { WorkspaceColors.divider.frame(width: 1) }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .padding(.trailing, 8)
+            .frame(width: columns[column])
+            .clipped()
+            .overlay(alignment: .trailing) {
+                WidthDivider(label: column.title + " column width", width: columns[column], limits: column.limits) {
+                    resize(column, $0, $1)
+                }.frame(width: 8)
+            }
+    }
+}
+
+struct HistoryGraphFooter: View {
+    let columns: HistoryColumns
+    @Binding var graphOffset: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: columns.refs)
+            HistoryGraphScroller(viewportWidth: columns.graph, scrollLimit: columns.graphScrollLimit, offset: $graphOffset)
+                .padding(.horizontal, 4)
+                .frame(width: columns.graph)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 12)
+        .background(WorkspaceColors.history)
+    }
+}
+
+private struct HistoryGraphScroller: NSViewRepresentable {
+    let viewportWidth: CGFloat
+    let scrollLimit: CGFloat
+    @Binding var offset: CGFloat
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSScroller {
+        let scroller = GraphScrollerControl(frame: NSRect(x: 0, y: 0, width: 100, height: 12))
+        scroller.thumbThickness = 2
+        scroller.scrollerStyle = .legacy
+        scroller.controlSize = .small
+        scroller.target = context.coordinator
+        scroller.action = #selector(Coordinator.scrolled(_:))
+        scroller.setAccessibilityLabel("Scroll graph horizontally")
+        scroller.toolTip = "Scroll graph horizontally"
+        return scroller
+    }
+
+    func updateNSView(_ scroller: NSScroller, context: Context) {
+        context.coordinator.scroll = { part, fraction in
+            let proposed: CGFloat
+            switch part {
+            case .decrementLine: proposed = offset - HistoryGraphStroke.laneSpacing
+            case .incrementLine: proposed = offset + HistoryGraphStroke.laneSpacing
+            case .decrementPage: proposed = offset - viewportWidth
+            case .incrementPage: proposed = offset + viewportWidth
+            default: proposed = fraction * scrollLimit
+            }
+            offset = min(scrollLimit, max(0, proposed))
+        }
+        scroller.knobProportion = viewportWidth / (viewportWidth + scrollLimit)
+        scroller.doubleValue = Double(min(scrollLimit, max(0, offset)) / scrollLimit)
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var scroll: ((NSScroller.Part, CGFloat) -> Void)?
+
+        @objc func scrolled(_ scroller: NSScroller) {
+            scroll?(scroller.hitPart, CGFloat(scroller.doubleValue))
+        }
+    }
+
+    private final class GraphScrollerControl: WorkspaceScroller {
+        override func accessibilityFrame() -> NSRect {
+            guard let window else { return super.accessibilityFrame() }
+            // This standalone scrollbar controls only the graph within the enclosing scroll view.
+            return window.convertToScreen(convert(bounds, to: nil))
+        }
     }
 }
 
 struct CommitTable<Badges: View>: NSViewRepresentable {
+    @Environment(\.appZoom) private var zoom
     let graph: CommitGraph
     let columns: HistoryColumns
+    let viewportWidth: CGFloat
+    @Binding var graphOffset: CGFloat
+    let historyScrolled: (CGFloat) -> Void
     let snapshot: RepositorySnapshot
     @Binding var selection: HistorySelection?
     let jump: CommitJump?
@@ -106,21 +238,29 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
         table.rowHeight = 29
         table.intercellSpacing = .zero
         table.backgroundColor = NSColor(WorkspaceColors.history)
-        table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        table.columnAutoresizingStyle = .noColumnAutoresizing
         table.setAccessibilityLabel("Commit history")
         let column = NSTableColumn(identifier: .init("commit"))
         column.minWidth = 0
-        column.resizingMask = .autoresizingMask
+        column.maxWidth = .greatestFiniteMagnitude
+        column.resizingMask = []
         table.addTableColumn(column)
         table.delegate = context.coordinator
         table.dataSource = context.coordinator
-        let scroll = NSScrollView()
+        let scroll = HistoryCommitScrollView()
+        scroll.scrollGraph = { [weak coordinator = context.coordinator, weak table] event in
+            guard let table else { return false }
+            let point = table.convert(event.locationInWindow, from: nil)
+            return coordinator?.scrollGraph(with: event, at: point.x) ?? false
+        }
+        scroll.didScrollHorizontally = { [weak coordinator = context.coordinator] position in
+            coordinator?.parent.historyScrolled(position)
+        }
         scroll.scrollerStyle = .overlay
         scroll.hasVerticalScroller = true
         scroll.useWorkspaceScrollers()
         scroll.drawsBackground = false
         scroll.documentView = table
-        table.autoresizingMask = [.width]
         return scroll
     }
 
@@ -129,10 +269,14 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
         let coordinator = context.coordinator
         let layoutChanged = coordinator.parent.columns != columns
         let actionsChanged = coordinator.parent.canAct != canAct
-        if actionsChanged || layoutChanged || coordinator.graphID != graph.id || coordinator.snapshotID != snapshot.id {
+        let offset = columns.clampGraphOffset(graphOffset)
+        let offsetChanged = coordinator.displayedGraphOffset != offset
+        updateColumnLayout(in: scroll, table: table)
+        if actionsChanged || layoutChanged || offsetChanged || coordinator.graphID != graph.id || coordinator.snapshotID != snapshot.id {
             (table as? HistoryTableView)?.referencePreview.dismiss()
         }
         coordinator.parent = self
+        coordinator.displayedGraphOffset = offset
         coordinator.updating = true
         defer { coordinator.updating = false }
         if coordinator.graphID != graph.id || coordinator.snapshotID != snapshot.id {
@@ -156,11 +300,19 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
         } else if actionsChanged {
             // Hosted badges capture their checkout and menu actions when their row is configured.
             table.reloadData()
-        } else if layoutChanged {
+        } else if layoutChanged || offsetChanged {
             table.enumerateAvailableRowViews { rowView, _ in
                 let cell = rowView.view(atColumn: 0)
-                if let cell = cell as? CommitCell { cell.columns = columns }
-                if let cell = cell as? NSHostingView<WorkingTreeRow> { cell.rootView.columns = columns }
+                if let cell = cell as? CommitCell {
+                    if layoutChanged { cell.columns = columns }
+                    cell.graphOffset = offset
+                }
+                if let cell = cell as? NSHostingView<WorkingTreeRow> {
+                    var content = cell.rootView
+                    content.columns = columns
+                    content.graphOffset = offset
+                    cell.rootView = content
+                }
             }
         }
         let selectedRows = coordinator.indexes(for: selection)
@@ -173,10 +325,26 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
         }
     }
 
+    private func updateColumnLayout(in scroll: NSScrollView, table: NSTableView) {
+        let width = max(viewportWidth, columns.totalWidth)
+        if table.tableColumns[0].width != width {
+            table.tableColumns[0].width = width
+        }
+        if table.frame.width != width {
+            table.setFrameSize(NSSize(width: width, height: table.frame.height))
+        }
+        let hasOverflow = columns.totalWidth - viewportWidth > 0.5
+        if scroll.hasHorizontalScroller != hasOverflow {
+            scroll.hasHorizontalScroller = hasOverflow
+            scroll.useWorkspaceScrollers()
+        }
+    }
+
     @MainActor final class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource {
         var parent: CommitTable
         var graphID: UUID?
         var snapshotID: UUID?
+        var displayedGraphOffset: CGFloat = 0
         fileprivate var counts = WorkingChangeCounts([])
         var refs: [String: [RepositoryReference]] = [:]
         var badgesByCommit: [String: [GraphReferenceBadge]] = [:]
@@ -184,6 +352,24 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
         var updating = false
 
         init(_ parent: CommitTable) { self.parent = parent }
+
+        func scrollGraph(with event: NSEvent, at x: CGFloat) -> Bool {
+            let columns = parent.columns
+            guard columns.graphScrollLimit > 0, x >= columns.refs, x < columns.refs + columns.graph else { return false }
+            let horizontal = event.scrollingDeltaX
+            let vertical = event.scrollingDeltaY
+            let delta: CGFloat
+            if abs(horizontal) > abs(vertical) {
+                delta = horizontal
+            } else if horizontal == 0, vertical != 0, event.modifierFlags.contains(.shift) {
+                delta = vertical
+            } else {
+                return false
+            }
+            let movement = event.hasPreciseScrollingDeltas ? delta / parent.zoom.wrappedValue.scale : delta * 22
+            parent.graphOffset = columns.clampGraphOffset(parent.graphOffset - movement)
+            return true
+        }
 
         var commitOffset: Int { parent.graph.hasWorkingTree ? 1 : 0 }
 
@@ -220,6 +406,7 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
             if parent.graph.hasWorkingTree && row == 0 {
                 let identifier = NSUserInterfaceItemIdentifier("workingTreeCell")
                 let content = WorkingTreeRow(counts: counts, columns: parent.columns,
+                                             graphOffset: displayedGraphOffset,
                                              hasParent: parent.snapshot.repository.headID != nil)
                 if let cell = table.makeView(withIdentifier: identifier, owner: self) as? NSHostingView<WorkingTreeRow> {
                     cell.rootView = content
@@ -236,7 +423,8 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
             let graph = parent.graph
             let item = graph.rows[row - commitOffset]
             let badges = badgesByCommit[item.id] ?? []
-            cell.configure(item, columns: parent.columns, lanes: graph.laneCount, head: item.id == parent.snapshot.repository.headID,
+            cell.graphOffset = displayedGraphOffset
+            cell.configure(item, columns: parent.columns, head: item.id == parent.snapshot.repository.headID,
                            badges: badges.isEmpty ? nil : AnyView(parent.badges(badges, item.color).id(item.id)))
             return cell
         }
@@ -424,6 +612,27 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
     }
 }
 
+private final class HistoryCommitScrollView: NSScrollView {
+    var scrollGraph: ((NSEvent) -> Bool)?
+    var didScrollHorizontally: ((CGFloat) -> Void)?
+    private var reportedOffset: CGFloat = 0
+
+    override func reflectScrolledClipView(_ clipView: NSClipView) {
+        super.reflectScrolledClipView(clipView)
+        guard clipView === contentView, clipView.bounds.minX != reportedOffset else { return }
+        reportedOffset = clipView.bounds.minX
+        // Native layout can correct the scroll position during a SwiftUI update.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            didScrollHorizontally?(reportedOffset)
+        }
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        if scrollGraph?(event) != true { super.scrollWheel(with: event) }
+    }
+}
+
 final class HistoryTableView: NSTableView {
     private static let tables = NSHashTable<HistoryTableView>.weakObjects()
     var root: URL?
@@ -554,7 +763,6 @@ private final class CommitCell: NSTableCellView {
     private let date = NSTextField(labelWithString: "")
     private var host: NSHostingView<AnyView>?
     private var row: CommitGraph.Row?
-    private var lanes = 1
     private var head = false
     private var initials = ""
     override var isFlipped: Bool { true }
@@ -576,10 +784,9 @@ private final class CommitCell: NSTableCellView {
 
     required init?(coder: NSCoder) { nil }
 
-    func configure(_ row: CommitGraph.Row, columns: HistoryColumns, lanes: Int, head: Bool, badges: AnyView?) {
+    func configure(_ row: CommitGraph.Row, columns: HistoryColumns, head: Bool, badges: AnyView?) {
         self.columns = columns
         self.row = row
-        self.lanes = lanes
         self.head = head
         initials = row.commit.authorInitials
         if row.commit.parents.count > 1 {
@@ -608,11 +815,15 @@ private final class CommitCell: NSTableCellView {
         needsDisplay = true
     }
 
-    var columns = HistoryColumns(width: 0, lanes: 1, preferredRefs: 0) {
+    var columns = HistoryColumns(width: 0, lanes: 1) {
         didSet {
             needsLayout = true
             needsDisplay = true
         }
+    }
+
+    var graphOffset: CGFloat = 0 {
+        didSet { if oldValue != graphOffset { needsDisplay = true } }
     }
 
     override func layout() {
@@ -624,52 +835,58 @@ private final class CommitCell: NSTableCellView {
         subject.frame = CGRect(x: messageX + 5, y: y, width: max(0, c.message - 10), height: 16)
         author.frame = CGRect(x: messageX + c.message + 4, y: y, width: max(0, c.author - 8), height: 16)
         date.frame = CGRect(x: messageX + c.message + c.author + 4, y: y, width: max(0, c.date - 8), height: 16)
-        author.isHidden = c.author == 0
-        date.isHidden = c.date == 0
     }
 
-    private var graphStep: CGFloat {
-        let space = max(0, columns.graph - HistoryGraphStroke.laneInset * 2)
-        if lanes == 1 { return min(HistoryGraphStroke.laneSpacing, columns.graph) }
-        return min(HistoryGraphStroke.laneSpacing, space / CGFloat(lanes - 1))
+    private var graphBounds: CGRect {
+        CGRect(x: columns.refs, y: 0, width: columns.graph, height: bounds.height)
     }
 
     private func graphX(lane: Int) -> CGFloat {
-        columns.refs + HistoryGraphStroke.laneInset + CGFloat(lane) * graphStep
+        columns.refs + HistoryGraphStroke.laneInset + CGFloat(lane) * HistoryGraphStroke.laneSpacing - graphOffset
     }
 
     func hoverAnchor(at location: NSPoint) -> NSRect? {
         guard let host, let row else { return nil }
         if host.frame.contains(location) { return host.frame }
-        let node = NSRect(x: graphX(lane: row.column) - 11, y: bounds.midY - 11, width: 22, height: 22)
+        let markerX = HistoryGraphStroke.visibleMarkerX(graphX(lane: row.column), in: graphBounds)
+        let node = NSRect(x: markerX - 11, y: bounds.midY - 11, width: 22, height: 22)
         return node.contains(location) ? host.frame : nil
     }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let row, let cg = NSGraphicsContext.current?.cgContext else { return }
-        let center = CGPoint(x: graphX(lane: row.column), y: bounds.midY)
+        let laneX = graphX(lane: row.column)
+        let markerX = HistoryGraphStroke.visibleMarkerX(laneX, in: graphBounds)
+        let marker = CGPoint(x: markerX, y: bounds.midY)
+        let pinned = markerX != laneX
         let tint = BranchColors.graph(row.color)
-        let scale = min(1, max(0.35, graphStep / 12))
-        let strokeWidth = HistoryGraphStroke.width * max(0.62, scale)
 
         cg.saveGState()
         defer { cg.restoreGState() }
         cg.setShouldAntialias(true)
         cg.setLineJoin(.round)
-        cg.setLineWidth(strokeWidth)
-        drawRowTint(tint, from: center, in: cg)
+        cg.setLineWidth(HistoryGraphStroke.width)
+        drawBranchLeader(tint, to: marker, in: cg)
+        let accent = HistoryGraphStroke.accentRect(in: graphBounds)
+        drawRowTint(tint, markerX: markerX, pinned: pinned, endingAt: accent, in: cg)
+        cg.clip(to: CGRect(x: graphBounds.minX, y: 0, width: accent.maxX - graphBounds.minX, height: bounds.height))
         drawLanes(of: row, in: cg)
-        drawNode(at: center, tint: tint, isMerge: row.commit.parents.count > 1, scale: scale, in: cg)
+        drawNode(at: marker, tint: tint, isMerge: row.commit.parents.count > 1, pinned: pinned, in: cg)
+        cg.setFillColor(tint.cgColor)
+        cg.fill(accent)
     }
 
-    private func drawRowTint(_ tint: NSColor, from center: CGPoint, in cg: CGContext) {
-        cg.setFillColor(tint.withAlphaComponent(0.085).cgColor)
-        cg.fill(CGRect(x: center.x, y: 3, width: max(0, bounds.maxX - center.x), height: bounds.height - 6))
-        if let host {
-            cg.setFillColor(tint.withAlphaComponent(0.32).cgColor)
-            cg.fill(CGRect(x: host.frame.maxX, y: center.y - 0.5, width: max(0, center.x - host.frame.maxX), height: 1))
-        }
+    private func drawRowTint(_ tint: NSColor, markerX: CGFloat, pinned: Bool, endingAt accent: CGRect, in cg: CGContext) {
+        let start = max(graphBounds.minX, markerX - (pinned ? HistoryGraphStroke.laneInset : 0))
+        cg.setFillColor(tint.withAlphaComponent(0.10).cgColor)
+        cg.fill(CGRect(x: start, y: accent.minY, width: accent.maxX - start, height: accent.height))
+    }
+
+    private func drawBranchLeader(_ tint: NSColor, to center: CGPoint, in cg: CGContext) {
+        guard let host else { return }
+        cg.setFillColor(tint.withAlphaComponent(0.32).cgColor)
+        cg.fill(CGRect(x: host.frame.maxX, y: center.y - 0.5, width: max(0, center.x - host.frame.maxX), height: 1))
     }
 
     private func drawLanes(of row: CommitGraph.Row, in cg: CGContext) {
@@ -701,18 +918,18 @@ private final class CommitCell: NSTableCellView {
         cg.strokePath()
     }
 
-    private func drawNode(at center: CGPoint, tint: NSColor, isMerge: Bool, scale: CGFloat, in cg: CGContext) {
-        let showsInitials = !isMerge && !initials.isEmpty && graphStep >= 19
-        let radius = showsInitials ? min(11.5, (graphStep - 3) / 2) : (isMerge ? 5.5 : 4.5) * scale
+    private func drawNode(at center: CGPoint, tint: NSColor, isMerge: Bool, pinned: Bool, in cg: CGContext) {
+        let showsInitials = !isMerge && !initials.isEmpty
+        let radius: CGFloat = showsInitials ? 11 : (isMerge ? 5.5 : 4.5)
         let dot = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
         let surface = NSColor(WorkspaceColors.history).cgColor
         cg.setLineDash(phase: 0, lengths: [])
         if head {
-            let ring = dot.insetBy(dx: -2 * scale, dy: -2 * scale)
+            let ring = dot.insetBy(dx: -2, dy: -2)
             cg.setFillColor(surface)
             cg.fillEllipse(in: ring)
             cg.setStrokeColor(tint.cgColor)
-            cg.setLineWidth(max(0.75, scale))
+            cg.setLineWidth(1)
             cg.strokeEllipse(in: ring)
         }
         if isMerge {
@@ -724,19 +941,19 @@ private final class CommitCell: NSTableCellView {
             cg.setFillColor(tint.cgColor)
             cg.fillPath()
         } else {
-            let fill = showsInitials ? tint.blended(withFraction: 0.42, of: .black) ?? tint : tint
+            let fill = showsInitials ? tint.blended(withFraction: pinned ? 0.56 : 0.42, of: .black) ?? tint : tint
             cg.setFillColor(fill.cgColor)
             cg.fillEllipse(in: dot)
         }
-        if showsInitials { drawInitials(at: center, radius: radius) }
+        if showsInitials { drawInitials(at: center, radius: radius, pinned: pinned) }
     }
 
-    private func drawInitials(at center: CGPoint, radius: CGFloat) {
+    private func drawInitials(at center: CGPoint, radius: CGFloat, pinned: Bool) {
         let label = initials as NSString
         let pointSize = min(10.5, radius)
         var attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: pointSize, weight: .bold),
-            .foregroundColor: NSColor.white
+            .foregroundColor: NSColor.white.withAlphaComponent(pinned ? 0.82 : 1)
         ]
         let availableWidth = radius * 2 - 3
         let labelWidth = label.size(withAttributes: attributes).width
@@ -792,6 +1009,7 @@ private struct WorkingChangeCounts {
 private struct WorkingTreeRow: View {
     let counts: WorkingChangeCounts
     var columns: HistoryColumns
+    var graphOffset: CGFloat
     let hasParent: Bool
 
     var body: some View {
@@ -799,19 +1017,23 @@ private struct WorkingTreeRow: View {
         HStack(spacing: 0) {
             Color.clear.frame(width: c.refs)
             Canvas { context, size in
-                let center = CGPoint(x: HistoryGraphStroke.laneInset, y: size.height / 2)
+                let graphBounds = CGRect(origin: .zero, size: size)
+                let laneX = HistoryGraphStroke.laneInset - graphOffset
+                let center = CGPoint(x: HistoryGraphStroke.visibleMarkerX(laneX, in: graphBounds), y: size.height / 2)
                 let stroke = StrokeStyle(lineWidth: HistoryGraphStroke.width, lineCap: .round, dash: HistoryGraphStroke.dash)
                 let color = Color(nsColor: HistoryGraphStroke.workingTree)
                 if hasParent {
                     var stem = Path()
-                    stem.move(to: CGPoint(x: center.x, y: center.y + 7))
-                    stem.addLine(to: CGPoint(x: center.x, y: size.height))
+                    stem.move(to: CGPoint(x: laneX, y: center.y + 7))
+                    stem.addLine(to: CGPoint(x: laneX, y: size.height))
                     context.stroke(stem, with: .color(color), style: stroke)
                 }
                 let ring = CGRect(x: center.x - 7, y: center.y - 7, width: 14, height: 14)
                 context.stroke(Path(ellipseIn: ring), with: .color(color), style: stroke)
+                context.fill(Path(HistoryGraphStroke.accentRect(in: graphBounds)), with: .color(color))
             }
             .frame(width: c.graph)
+            .clipped()
             Text("// WIP")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .padding(.horizontal, 7).padding(.vertical, 2)
