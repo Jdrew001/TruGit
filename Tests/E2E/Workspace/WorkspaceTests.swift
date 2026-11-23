@@ -53,6 +53,48 @@ final class WorkspaceTests: TruGitUITestCase {
         expectText("This is a development build. Automatic updates are available in signed distribution builds.")
     }
 
+    func testFeedbackCreatesIssuesInTruGitWithVersion() throws {
+        try repository.git("remote", "add", "origin", "https://github.com/example/other.git")
+        let fixture = repository.root.appendingPathComponent("feedback.json")
+        let receipt = repository.root.appendingPathComponent("issue.json")
+        let destination = "/repos/Jdrew001/TruGit/issues"
+        let responses: [String: Any] = ["pull": [:], "files": [], "writes": [destination: ["number": 42]]]
+        try JSONSerialization.data(withJSONObject: responses).write(to: fixture)
+        app.launchEnvironment["TRUGIT_PULL_FIXTURE"] = fixture.path
+        app.launchEnvironment["TRUGIT_REQUEST_LOG"] = receipt.path
+        launch()
+
+        let version = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@",
+                                                           "TruGit ", " · Build ")).firstMatch
+        XCTAssertTrue(version.exists)
+        let installedVersion = version.label
+
+        for (action, heading, label) in [("Report a Bug", "Bug report", "bug"),
+                                         ("Request a Feature", "Feature request", "enhancement")] {
+            let menu = app.descendants(matching: .any)["Feedback"].firstMatch
+            clickVisible(menu)
+            app.menuItems[action + "…"].click()
+
+            let submit = app.buttons["Submit Issue"]
+            XCTAssertTrue(submit.waitForExistence(timeout: 5))
+            XCTAssertFalse(submit.isEnabled)
+            enter("  Example feedback  ", in: app.textFields["Title"])
+            XCTAssertFalse(submit.isEnabled)
+            enter("Example details", in: app.textViews["Details"].firstMatch)
+            clickVisible(submit)
+            expectText("Created TruGit issue #42.")
+            XCTAssertTrue(app.links["View Issue"].exists)
+
+            let request = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: receipt)) as? [String: Any])
+            XCTAssertEqual(request["path"] as? String, destination)
+            let fields = try XCTUnwrap(request["fields"] as? [String: Any])
+            XCTAssertEqual(fields["title"] as? String, "Example feedback")
+            XCTAssertEqual(fields["labels"] as? [String], [label])
+            XCTAssertEqual(fields["body"] as? String, "## \(heading)\n\nExample details\n\n## App version\n\n" + installedVersion)
+            clickVisible(app.buttons["Done"])
+        }
+    }
+
     func testCloseLastTabAndCancelEmptyClone() {
         launch()
         app.typeKey("w", modifierFlags: .command)

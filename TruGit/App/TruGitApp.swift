@@ -5,12 +5,19 @@ struct TruGitApp: App {
     @StateObject private var updates = AppUpdates()
     @State private var github = GitHubAccount()
     @State private var model = RepositoryModel()
+    @State private var feedback: FeedbackKind?
     @AppStorage("appZoom") private var zoom = AppZoom.initialValue
 
     var body: some Scene {
         Window("TruGit", id: "main") {
             AppZoomViewport {
                 RepositoryView(model: model)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        AppStatusBar { feedback = $0 }
+                    }
+                    .sheet(item: $feedback) { kind in
+                        FeedbackView(kind: kind).zoomAppDialog()
+                    }
                     .environmentObject(updates)
                     .environment(github)
             }
@@ -23,6 +30,11 @@ struct TruGitApp: App {
             CommandGroup(after: .appInfo) {
                 if updates.configured {
                     Button("Check for Updates…", action: updates.check).disabled(!updates.canCheck)
+                }
+            }
+            CommandGroup(after: .help) {
+                ForEach(FeedbackKind.allCases) { kind in
+                    Button(kind.title + "…") { feedback = kind }
                 }
             }
             CommitCommands()

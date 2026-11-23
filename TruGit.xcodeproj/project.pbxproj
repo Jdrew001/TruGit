@@ -42,6 +42,7 @@
 		000000000000000000000061 /* LaunchSplash.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000051 /* LaunchSplash.swift */; };
 		AB43EF100000000000000001 /* TruGitSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB43EF100000000000000002 /* TruGitSettings.swift */; };
 		ACAE00000000000000000011 /* AppUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACAE00000000000000000012 /* AppUpdates.swift */; };
+		ACAFFEED0000000000000001 /* FeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACAFFEED0000000000000002 /* FeedbackView.swift */; };
 		000000000000000000000062 /* RepositoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000052 /* RepositoryModel.swift */; };
 		000000000000000000000063 /* RepositoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000053 /* RepositoryView.swift */; };
 		000000000000000000000065 /* CloneRepositorySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000055 /* CloneRepositorySheet.swift */; };
@@ -156,6 +157,7 @@
 		000000000000000000000051 /* LaunchSplash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchSplash.swift; sourceTree = "<group>"; };
 		AB43EF100000000000000002 /* TruGitSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TruGitSettings.swift; sourceTree = "<group>"; };
 		ACAE00000000000000000012 /* AppUpdates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdates.swift; sourceTree = "<group>"; };
+		ACAFFEED0000000000000002 /* FeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackView.swift; sourceTree = "<group>"; };
 		000000000000000000000052 /* RepositoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryModel.swift; sourceTree = "<group>"; };
 		000000000000000000000053 /* RepositoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryView.swift; sourceTree = "<group>"; };
 		000000000000000000000055 /* CloneRepositorySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloneRepositorySheet.swift; sourceTree = "<group>"; };
@@ -313,6 +315,7 @@
 				000000000000000000000051 /* LaunchSplash.swift */,
 				AB43EF100000000000000002 /* TruGitSettings.swift */,
 				ACAE00000000000000000012 /* AppUpdates.swift */,
+				ACAFFEED0000000000000002 /* FeedbackView.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -632,6 +635,7 @@
 				000000000000000000000061 /* LaunchSplash.swift in Sources */,
 				AB43EF100000000000000001 /* TruGitSettings.swift in Sources */,
 				ACAE00000000000000000011 /* AppUpdates.swift in Sources */,
+				ACAFFEED0000000000000001 /* FeedbackView.swift in Sources */,
 				000000000000000000000062 /* RepositoryModel.swift in Sources */,
 				000000000000000000000063 /* RepositoryView.swift in Sources */,
 				000000000000000000000065 /* CloneRepositorySheet.swift in Sources */,

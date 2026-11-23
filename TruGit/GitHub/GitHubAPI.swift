@@ -118,6 +118,20 @@ struct GitHubAPI: Sendable {
         return try decode(await request(baseRepo.endpoint + ["pulls"], body: JSONEncoder().encode(fields)).0)
     }
 
+    func createIssue(in repo: GitHubRepository, title: String, body: String, label: String) async throws -> Int {
+        struct NewIssue: Encodable {
+            let title: String
+            let body: String
+            let labels: [String]
+        }
+        struct CreatedIssue: Decodable { let number: Int }
+
+        let issue = NewIssue(title: title, body: body, labels: [label])
+        let (data, _) = try await request(repo.endpoint + ["issues"], body: JSONEncoder().encode(issue))
+        let created: CreatedIssue = try decode(data)
+        return created.number
+    }
+
     func comment(_ body: String, repo: GitHubRepository, number: Int, replyingTo: Int? = nil) async throws {
         let path = replyingTo.map { ["pulls", String(number), "comments", String($0), "replies"] }
             ?? ["issues", String(number), "comments"]
