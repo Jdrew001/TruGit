@@ -1105,21 +1105,19 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
         .background(WorkspaceColors.history)
     }
 
-    private func locationLabel(_ badge: GraphReferenceBadge, wraps: Bool = false) -> some View {
+    private func locationLabel(_ badge: GraphReferenceBadge) -> some View {
         BranchLocationLabel(badge: badge, repository: snapshot.repository.root, checkedOut: snapshot.isCheckedOut(badge.reference),
-                            wraps: wraps, select: onSelectReference, checkout: onCheckout, drop: onDrop, menu: referenceMenu)
+                            select: onSelectReference, checkout: onCheckout, drop: onDrop, menu: referenceMenu)
     }
 
-    private func expandedBadges(_ badges: [GraphReferenceBadge], width: CGFloat) -> AnyView {
-        let atHead = badges.contains { snapshot.isCheckedOut($0.reference) }
-        let tint = atHead ? Color(red: 0.03, green: 0.55, blue: 0.66)
-                          : badges.first.map { snapshot.colors.color(for: $0.reference) } ?? WorkspaceColors.accent
-        return AnyView(LazyVStack(alignment: .leading, spacing: 0) {
+    private func expandedBadges(_ badges: [GraphReferenceBadge]) -> AnyView {
+        AnyView(LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(badges) { badge in
                 let ref = badge.reference
                 let current = snapshot.isCheckedOut(ref)
+                let tint = current ? WorkspaceColors.accent : snapshot.colors.color(for: ref)
                 HStack(spacing: 5) {
-                    locationLabel(badge, wraps: true)
+                    locationLabel(badge)
                     Spacer(minLength: 0)
                     if ref.kind == .local && !current {
                         Button(snapshot.otherWorktree(for: ref.name) == nil ? "Switch" : "Open") { onCheckout(ref) }
@@ -1127,18 +1125,19 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
                             .accessibilityLabel(snapshot.checkoutTitle(for: ref)).help(snapshot.checkoutTitle(for: ref))
                     }
                 }
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(current ? 1 : 0.87))
-                .padding(.horizontal, 6).frame(maxWidth: .infinity, minHeight: GraphReferencePreview.rowHeight, alignment: .leading)
+                .font(.system(size: GraphReferencePreview.fontSize, weight: current ? .semibold : .medium))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 7)
+                .frame(maxWidth: .infinity, alignment: .leading).frame(height: GraphReferencePreview.rowHeight)
                 .background {
-                    GraphReferenceRowBackground(badge: badge, tint: tint.opacity(current ? 0.64 : 0.27))
+                    GraphReferenceRowBackground(badge: badge, tint: tint.opacity(current ? 0.16 : 0.035))
                         .modifier(BranchDragControl(reference: ref, repository: snapshot.repository.root,
                                                     onSelect: onSelectReference, onCheckout: onCheckout, onDrop: onDrop))
                         .contextMenu { referenceMenu(ref) }
                         .accessibilityHidden(true)
                 }
             }
-        }.background(WorkspaceColors.history))
+        })
     }
 
     private func referenceBadge(_ badge: GraphReferenceBadge) -> some View {

@@ -51,7 +51,6 @@ struct BranchLocationLabel<MenuItems: View>: View {
     let badge: GraphReferenceBadge
     let repository: URL
     var checkedOut = false
-    var wraps = false
     let select: (RepositoryReference) -> Void
     let checkout: (RepositoryReference) -> Void
     let drop: (BranchDrag, RevisionPoint) -> Bool
@@ -65,8 +64,7 @@ struct BranchLocationLabel<MenuItems: View>: View {
                         Image(systemName: "checkmark").fontWeight(.bold).frame(width: 11)
                     }
                     Text(verbatim: badge.name)
-                        .lineLimit(wraps ? nil : 1)
-                        .fixedSize(horizontal: false, vertical: wraps)
+                        .lineLimit(1)
                         .truncationMode(.tail)
                     if badge.reference.kind != .remote || badge.remotes.count == 1 {
                         glyph(badge.reference)

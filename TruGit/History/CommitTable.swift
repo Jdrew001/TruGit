@@ -1,6 +1,25 @@
 import AppKit
 import SwiftUI
 
+private enum HistoryGraphStroke {
+    static let laneInset: CGFloat = 13
+    static let width: CGFloat = 1.65
+    static let dash: [CGFloat] = [2, 3]
+    static let workingTree = NSColor.systemTeal.withAlphaComponent(0.86)
+
+    static func addConnection(from start: CGPoint, to end: CGPoint, in cg: CGContext) {
+        cg.move(to: start)
+        guard start.x != end.x else {
+            cg.addLine(to: end)
+            return
+        }
+        // Vertical tangents meet the neighboring rows without a kink at the lane boundary.
+        let handle = (end.y - start.y) * 0.32
+        cg.addCurve(to: end, control1: CGPoint(x: start.x, y: start.y + handle),
+                   control2: CGPoint(x: end.x, y: end.y - handle))
+    }
+}
+
 struct HistoryColumns: Equatable {
     let refLimits: ClosedRange<CGFloat>
     let refs: CGFloat
@@ -56,7 +75,7 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
     let createTag: (RevisionPoint) -> Void
     let canAct: Bool
     let onDrop: (BranchDrag, RevisionPoint) -> Bool
-    let expandedBadges: ([GraphReferenceBadge], CGFloat) -> AnyView
+    let expandedBadges: ([GraphReferenceBadge]) -> AnyView
     @ViewBuilder let badges: ([GraphReferenceBadge]) -> Badges
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -66,7 +85,7 @@ struct CommitTable<Badges: View>: NSViewRepresentable {
         table.branchMenu = { [weak coordinator = context.coordinator] index, ref in coordinator?.branchMenu(at: index, clicked: ref) }
         table.hoverReferences = { [weak coordinator = context.coordinator] row in
             guard let coordinator, let point = coordinator.point(at: row), let badges = coordinator.badgesByCommit[point.oid] else { return nil }
-            return (point.oid, badges, { coordinator.parent.expandedBadges(badges, $0) })
+            return (point.oid, badges, { coordinator.parent.expandedBadges(badges) })
         }
         table.root = snapshot.repository.root
         table.setDraggingSourceOperationMask(.copy, forLocal: true)
@@ -403,7 +422,7 @@ final class HistoryTableView: NSTableView {
     var draggedCommits: BranchDrag?
 
     let referencePreview = GraphReferencePreview()
-    var hoverReferences: ((Int) -> (String, [GraphReferenceBadge], (CGFloat) -> AnyView)?)?
+    var hoverReferences: ((Int) -> (String, [GraphReferenceBadge], () -> AnyView)?)?
     private var departingCommit: String?
     private var mouseMonitor: Any?
     private var hoverArea: NSTrackingArea?
@@ -456,7 +475,7 @@ final class HistoryTableView: NSTableView {
         showReferences(at: event.locationInWindow)
     }
 
-    private func showReferences(at windowPoint: NSPoint) {
+    private func showReferences(at windowPoint: NSPoint, immediately: Bool = false) {
         let location = convert(windowPoint, from: nil)
         let index = row(at: location)
         guard visibleRect.contains(location), index >= 0, let cell = view(atColumn: 0, row: index, makeIfNecessary: false) as? CommitCell,
@@ -475,7 +494,8 @@ final class HistoryTableView: NSTableView {
             referencePreview.dismiss()
             return
         }
-        referencePreview.hover(badges, at: commitID, anchor: convert(anchor, from: cell), in: self, content: content)
+        referencePreview.hover(badges, at: commitID, anchor: convert(anchor, from: cell), in: self,
+                               immediately: immediately, content: content)
         referencePreview.updateHighlight(at: windowPoint, in: window)
     }
 
@@ -505,7 +525,7 @@ final class HistoryTableView: NSTableView {
             if table.referencePreview.contains(location, in: window) {
                 table.referencePreview.updateHighlight(at: location, in: window)
             } else {
-                table.showReferences(at: location)
+                table.showReferences(at: location, immediately: true)
             }
         }
     }
@@ -599,8 +619,9 @@ private final class CommitCell: NSTableCellView {
     }
 
     private func graphX(lane: Int) -> CGFloat {
-        let step = min(23, max(0, columns.graph - 26) / CGFloat(max(1, lanes - 1)))
-        return columns.refs + 13 + CGFloat(lane) * step
+        let inset = HistoryGraphStroke.laneInset
+        let step = min(23, max(0, columns.graph - inset * 2) / CGFloat(max(1, lanes - 1)))
+        return columns.refs + inset + CGFloat(lane) * step
     }
 
     func hoverAnchor(at location: NSPoint) -> NSRect? {
@@ -617,37 +638,54 @@ private final class CommitCell: NSTableCellView {
             CGPoint(x: graphX(lane: lane), y: bounds.height * height)
         }
         let center = point(row.column, 0.5)
-        func tint(_ index: Int) -> CGColor { BranchColors.native(index).cgColor }
-        cg.setLineWidth(2)
+
+        cg.saveGState()
+        defer { cg.restoreGState() }
+        cg.setShouldAntialias(true)
+        cg.setLineJoin(.round)
+        cg.setLineWidth(HistoryGraphStroke.width)
         for segment in row.segments {
             let start = point(segment.fromLane, segment.fromHeight)
             let end = point(segment.toLane, segment.toHeight)
-            let middle = (start.y + end.y) / 2
-            cg.setLineDash(phase: 0, lengths: segment.isWorkingTree ? [2, 3] : [])
-            cg.setStrokeColor(segment.isWorkingTree ? NSColor.systemTeal.cgColor : tint(segment.color))
-            cg.move(to: start)
-            cg.addCurve(to: end, control1: CGPoint(x: start.x, y: middle), control2: CGPoint(x: end.x, y: middle))
+            let color = segment.isWorkingTree ? HistoryGraphStroke.workingTree
+                : BranchColors.native(segment.color).withAlphaComponent(0.78)
+            cg.setLineCap(segment.isWorkingTree ? .round : .butt)
+            cg.setLineDash(phase: 0, lengths: segment.isWorkingTree ? HistoryGraphStroke.dash : [])
+            cg.setStrokeColor(color.cgColor)
+            HistoryGraphStroke.addConnection(from: start, to: end, in: cg)
             cg.strokePath()
         }
+
+        drawNode(row, at: center, in: cg)
+    }
+
+    private func drawNode(_ row: CommitGraph.Row, at center: CGPoint, in cg: CGContext) {
+        let tint = BranchColors.native(row.color).cgColor
+        let surface = NSColor(WorkspaceColors.history).cgColor
+        let dot = CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8)
         cg.setLineDash(phase: 0, lengths: [])
-        let dot = CGRect(x: center.x - 4.5, y: center.y - 4.5, width: 9, height: 9)
+        if head {
+            let ring = dot.insetBy(dx: -3.5, dy: -3.5)
+            cg.setFillColor(surface)
+            cg.fillEllipse(in: ring)
+            cg.setStrokeColor(tint)
+            cg.setLineWidth(1.4)
+            cg.strokeEllipse(in: ring)
+        }
         if row.commit.parents.count > 1 {
-            cg.move(to: CGPoint(x: center.x, y: center.y - 6))
-            cg.addLine(to: CGPoint(x: center.x + 6, y: center.y))
-            cg.addLine(to: CGPoint(x: center.x, y: center.y + 6))
-            cg.addLine(to: CGPoint(x: center.x - 6, y: center.y))
+            let radius: CGFloat = 5.25
+            cg.move(to: CGPoint(x: center.x, y: center.y - radius))
+            cg.addLine(to: CGPoint(x: center.x + radius, y: center.y))
+            cg.addLine(to: CGPoint(x: center.x, y: center.y + radius))
+            cg.addLine(to: CGPoint(x: center.x - radius, y: center.y))
             cg.closePath()
-            cg.setFillColor(NSColor(WorkspaceColors.history).cgColor)
-            cg.setStrokeColor(tint(row.color))
+            cg.setFillColor(surface)
+            cg.setStrokeColor(tint)
+            cg.setLineWidth(HistoryGraphStroke.width)
             cg.drawPath(using: .fillStroke)
         } else {
-            cg.setFillColor(tint(row.color))
+            cg.setFillColor(tint)
             cg.fillEllipse(in: dot)
-        }
-        if head {
-            cg.setStrokeColor(tint(row.color))
-            cg.setLineWidth(1.5)
-            cg.strokeEllipse(in: dot.insetBy(dx: -4, dy: -4))
         }
     }
 }
@@ -703,16 +741,17 @@ private struct WorkingTreeRow: View {
         HStack(spacing: 0) {
             Color.clear.frame(width: c.refs)
             Canvas { context, size in
-                let center = CGPoint(x: 12, y: size.height / 2)
-                let stroke = StrokeStyle(lineWidth: 1.8, lineCap: .round, dash: [1.5, 3])
+                let center = CGPoint(x: HistoryGraphStroke.laneInset, y: size.height / 2)
+                let stroke = StrokeStyle(lineWidth: HistoryGraphStroke.width, lineCap: .round, dash: HistoryGraphStroke.dash)
+                let color = Color(nsColor: HistoryGraphStroke.workingTree)
                 if hasParent {
                     var stem = Path()
                     stem.move(to: CGPoint(x: center.x, y: center.y + 7))
                     stem.addLine(to: CGPoint(x: center.x, y: size.height))
-                    context.stroke(stem, with: .color(.teal), style: stroke)
+                    context.stroke(stem, with: .color(color), style: stroke)
                 }
                 let ring = CGRect(x: center.x - 7, y: center.y - 7, width: 14, height: 14)
-                context.stroke(Path(ellipseIn: ring), with: .color(.teal), style: stroke)
+                context.stroke(Path(ellipseIn: ring), with: .color(color), style: stroke)
             }
             .frame(width: c.graph)
             Text("// WIP")
