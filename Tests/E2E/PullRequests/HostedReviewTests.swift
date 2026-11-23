@@ -106,6 +106,84 @@ final class HostedReviewTests: TruGitUITestCase {
         try checkRequest("pulls/42/reviews", fields: ["event": "APPROVE", "body": "", "commit_id": "abc123"])
     }
 
+    func testApprovalRevealsSavedSummaryWhileConversationCatchesUp() throws {
+        let reviewRoute = "/repos/example/review/pulls/42/reviews"
+        let body = "Verified the **checkout** flow."
+        let reviewer = try XCTUnwrap(app.launchEnvironment["TRUGIT_FIXTURE_LOGIN"])
+        let review: [String: Any] = ["id": 700, "state": "APPROVED", "body": body,
+                                     "user": ["login": reviewer], "submitted_at": "2026-11-23T21:30:00Z"]
+        let comments: [[String: Any]] = (0..<35).map { index in
+            ["id": 100 + index, "user": ["login": "author"], "body": "Earlier comment \(index)"]
+        }
+        var data = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: Any])
+        var writes = try XCTUnwrap(data["writes"] as? [String: Any])
+        writes[reviewRoute] = review
+        data["writes"] = writes
+        try JSONSerialization.data(withJSONObject: data).write(to: fixture, options: .atomic)
+        try writePages { _ in ["/repos/example/review/issues/42/comments||1": ["body": comments]] }
+
+        openPR()
+        clickVisible(app.buttons["Submit review…"])
+        clickVisible(app.sheets.buttons["Approve"])
+        enter(body, in: app.textFields["Write your review…"])
+        clickVisible(app.buttons["Approve PR"])
+        try checkRequest("pulls/42/reviews", fields: ["event": "APPROVE", "body": body, "commit_id": "abc123"])
+
+        expectText("approved")
+        expectText("Verified the checkout flow.")
+        expectText("Threads 26–37 of 37")
+        let conversation = app.scrollViews["pull-request-conversation"]
+        let summary = app.staticTexts["Verified the checkout flow."].firstMatch
+        XCTAssertTrue(conversation.frame.intersects(summary.frame))
+
+        var updated = review
+        updated["body"] = "Saved summary from GitHub."
+        try writePages { _ in
+            ["/repos/example/review/issues/42/comments||1": ["body": comments],
+             reviewRoute + "||1": ["body": [updated]]]
+        }
+        clickVisible(app.buttons["Refresh pull requests"])
+        expectText("Saved summary from GitHub.")
+        expectText("Threads 26–37 of 37")
+        XCTAssertFalse(summary.exists)
+    }
+
+    func testConversationRendersMarkdownBlocks() throws {
+        let markdown = """
+        ## Validation
+
+        This follows the **checkout** flow using `cartID`.
+
+        - [x] Orders are saved
+
+        > Retry failed requests.
+
+        ```swift
+        let ready = true
+        print(ready)
+        ```
+
+        | Check | Result |
+        | --- | --- |
+        | Build | Pass |
+        """
+        let comment: [String: Any] = ["id": 1, "user": ["login": "author"], "body": markdown]
+        try writePages { _ in ["/repos/example/review/issues/42/comments||1": ["body": [comment]]] }
+
+        openPR()
+        clickVisible(app.buttons["Conversation"])
+        for text in ["Validation", "This follows the checkout flow using cartID.", "Orders are saved",
+                     "Retry failed requests.", "swift"] {
+            expectText(text)
+        }
+        let syntax = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@",
+                                                          "let ready = true", "let ready = true")).firstMatch
+        XCTAssertTrue(syntax.waitForExistence(timeout: 10))
+        app.scrollViews["pull-request-conversation"].scroll(byDeltaX: 0, deltaY: -210)
+        expectText("Check")
+        expectText("Pass")
+    }
+
     func testRequestChangesRequiresSummary() throws {
         openPR()
         clickVisible(app.buttons["Submit review…"])

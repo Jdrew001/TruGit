@@ -149,7 +149,7 @@ struct GitHubAPI: Sendable {
         async let reviews: [PullActivity] = all(path + ["reviews"])
         async let inline: [PullActivity] = all(path + ["comments"])
         let entries = try await conversation + reviews + inline
-        return entries.sorted { ($0.submittedAt ?? $0.createdAt ?? .distantPast, $0.id) < ($1.submittedAt ?? $1.createdAt ?? .distantPast, $1.id) }
+        return entries.sorted { $0.precedes($1) }
     }
 
     func files(_ repo: GitHubRepository, _ number: Int) async throws -> [PullFile] {
@@ -198,12 +198,15 @@ struct GitHubAPI: Sendable {
         _ = try await request(repo.endpoint + path, method: .post, body: JSONEncoder().encode(["body": body]))
     }
 
-    func review(_ decision: ReviewDecision, body: String, repo: GitHubRepository, pull: GitHubPull) async throws {
+    func review(_ decision: ReviewDecision, body: String, repo: GitHubRepository, pull: GitHubPull) async throws -> PullActivity? {
         let latest = try await self.pull(repo, pull.number)
         guard latest.state == "open", latest.head.sha == pull.head.sha, latest.base.sha == pull.base.sha else {
             throw GitHubFailure("The pull request changed. Refresh and review the latest changes before submitting.")
         }
         let fields = ["event": decision.rawValue, "body": body, "commit_id": pull.head.sha]
-        _ = try await request(repo.endpoint + ["pulls", String(pull.number), "reviews"], method: .post, body: JSONEncoder().encode(fields))
+        let (data, _) = try await request(repo.endpoint + ["pulls", String(pull.number), "reviews"],
+                                          method: .post, body: JSONEncoder().encode(fields))
+        // GitHub accepted the submission even if its response cannot be shown before the refresh.
+        return try? decode(data)
     }
 }

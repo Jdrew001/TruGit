@@ -53,6 +53,7 @@
 		B00000000000000000000066 /* GitHubAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* GitHubAccount.swift */; };
 		B00000000000000000000067 /* GitHubModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000003 /* GitHubModels.swift */; };
 		B000000000000000000000F0 /* PullStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000040 /* PullStyle.swift */; };
+		F8CD81D2E8534C9C804B9671 /* PullMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8CD81D2E8534C9C804B9672 /* PullMessage.swift */; };
 		B00000000000000000000068 /* NewPullRequestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* NewPullRequestView.swift */; };
 		B00000000000000000000069 /* PullDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000005 /* PullDetailView.swift */; };
 		B0000000000000000000AF69 /* PersonalFileReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000AF05 /* PersonalFileReview.swift */; };
@@ -168,6 +169,7 @@
 		B00000000000000000000002 /* GitHubAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubAccount.swift; sourceTree = "<group>"; };
 		B00000000000000000000003 /* GitHubModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubModels.swift; sourceTree = "<group>"; };
 		B00000000000000000000040 /* PullStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PullStyle.swift; sourceTree = "<group>"; };
+		F8CD81D2E8534C9C804B9672 /* PullMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PullMessage.swift; sourceTree = "<group>"; };
 		B00000000000000000000004 /* NewPullRequestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewPullRequestView.swift; sourceTree = "<group>"; };
 		B00000000000000000000005 /* PullDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PullDetailView.swift; sourceTree = "<group>"; };
 		B0000000000000000000AF05 /* PersonalFileReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalFileReview.swift; sourceTree = "<group>"; };
@@ -403,6 +405,7 @@
 				B00000000000000000000002 /* GitHubAccount.swift */,
 				B00000000000000000000003 /* GitHubModels.swift */,
 				B00000000000000000000040 /* PullStyle.swift */,
+				F8CD81D2E8534C9C804B9672 /* PullMessage.swift */,
 				B00000000000000000000004 /* NewPullRequestView.swift */,
 				B00000000000000000000005 /* PullDetailView.swift */,
 				B0000000000000000000AF05 /* PersonalFileReview.swift */,
@@ -630,6 +633,7 @@
 				B00000000000000000000068 /* NewPullRequestView.swift in Sources */,
 				B00000000000000000000067 /* GitHubModels.swift in Sources */,
 				B000000000000000000000F0 /* PullStyle.swift in Sources */,
+				F8CD81D2E8534C9C804B9671 /* PullMessage.swift in Sources */,
 				B00000000000000000000066 /* GitHubAccount.swift in Sources */,
 				B00000000000000000000065 /* GitHubAPI.swift in Sources */,
 				000000000000000000000061 /* LaunchSplash.swift in Sources */,

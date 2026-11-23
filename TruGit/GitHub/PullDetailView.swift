@@ -12,6 +12,8 @@ struct PullDetailView: View {
     @State private var pull: GitHubPull?
     @State private var conversation = PullConversation(threads: [])
     @State private var conversationPage = 0
+    @State private var submittedReviews: [String: PullActivity] = [:]
+    @State private var revealedReview: String?
     @State private var files: [ReviewFile] = []
     @State private var selectedFile: String?
     @State private var showFiles = true
@@ -100,10 +102,7 @@ struct PullDetailView: View {
             Text("GitHub will close this pull request without merging it.")
         }
         .sheet(item: $reviewTarget) { reviewed in
-            ReviewSheet(api: api, repo: repo, pull: reviewed, login: login) {
-                showFiles = false
-                revision += 1
-            }
+            ReviewSheet(api: api, repo: repo, pull: reviewed, login: login, posted: showSubmittedReview)
             .zoomAppDialog()
         }
     }
@@ -120,29 +119,73 @@ struct PullDetailView: View {
                 conversationNavigation(range: start..<end, total: count, page: page, lastPage: lastPage)
                 Divider()
             }
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    if page == 0, let body = pull?.body, !body.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Description").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            PullMessage(body)
-                        }.padding(14).frame(maxWidth: .infinity, alignment: .leading).pullCard()
-                    }
-                    ForEach(conversation.threads[start..<end]) { thread in
-                        PullActivityCard(entry: thread.entry, replies: thread.replies, canReply: !sending) { replyTo = $0 }
-                    }
-                    if pull != nil && count == 0 {
-                        if loading {
-                            ProgressView("Loading conversation…").controlSize(.small)
-                        } else if error == nil {
-                            Text("No comments or reviews yet").foregroundStyle(.secondary)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        if page == 0, let body = pull?.body, !body.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Description").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                PullMessage(body)
+                            }.padding(14).frame(maxWidth: .infinity, alignment: .leading).pullCard()
                         }
+                        ForEach(conversation.threads[start..<end]) { thread in
+                            PullActivityCard(entry: thread.entry, replies: thread.replies, canReply: !sending) { replyTo = $0 }
+                                .id(thread.id)
+                        }
+                        if pull != nil && count == 0 {
+                            if loading {
+                                ProgressView("Loading conversation…").controlSize(.small)
+                            } else if error == nil {
+                                Text("No comments or reviews yet").foregroundStyle(.secondary)
+                            }
+                        }
+                    }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .accessibilityIdentifier("pull-request-conversation")
+                .onChange(of: reviewLocation, initial: true) { _, location in
+                    if let location, (start..<end).contains(location.index) {
+                        proxy.scrollTo(location.id, anchor: .top)
                     }
-                }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .id(page)
             }
-            .accessibilityIdentifier("pull-request-conversation")
-            .id(page)
         }
+    }
+
+    private struct ReviewLocation: Equatable {
+        let id: String
+        let index: Int
+    }
+
+    private var reviewLocation: ReviewLocation? {
+        guard let revealedReview, let index = conversation.threads.firstIndex(where: { $0.id == revealedReview }) else {
+            return nil
+        }
+        return ReviewLocation(id: revealedReview, index: index)
+    }
+
+    private func showSubmittedReview(_ review: PullActivity?) {
+        if let review {
+            submittedReviews[review.key] = review
+            revealedReview = review.key
+            updateConversation(conversation.includingSubmittedReviews([review]))
+        }
+        showFiles = false
+        revision += 1
+    }
+
+    private func updateConversation(_ conversation: PullConversation) {
+        self.conversation = conversation
+        if let location = reviewLocation {
+            conversationPage = location.index / Self.threadsPerPage
+        } else {
+            conversationPage = min(conversationPage, lastConversationPage(threadCount: conversation.threads.count))
+        }
+    }
+
+    private func goToConversationPage(_ page: Int) {
+        revealedReview = nil
+        conversationPage = page
     }
 
     private func lastConversationPage(threadCount: Int) -> Int {
@@ -154,13 +197,13 @@ struct PullDetailView: View {
             Text("Threads \(range.lowerBound + 1)–\(range.upperBound) of \(total)")
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            Button("First threads", systemImage: "chevron.left.to.line") { conversationPage = 0 }
+            Button("First threads", systemImage: "chevron.left.to.line") { goToConversationPage(0) }
                 .help("First threads").disabled(page == 0)
-            Button("Previous threads", systemImage: "chevron.left") { conversationPage = page - 1 }
+            Button("Previous threads", systemImage: "chevron.left") { goToConversationPage(page - 1) }
                 .help("Previous threads").disabled(page == 0)
-            Button("Next threads", systemImage: "chevron.right") { conversationPage = page + 1 }
+            Button("Next threads", systemImage: "chevron.right") { goToConversationPage(page + 1) }
                 .help("Next threads").disabled(page == lastPage)
-            Button("Latest threads", systemImage: "chevron.right.to.line") { conversationPage = lastPage }
+            Button("Latest threads", systemImage: "chevron.right.to.line") { goToConversationPage(lastPage) }
                 .help("Latest threads").disabled(page == lastPage)
         }
         .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.small)
@@ -182,8 +225,11 @@ struct PullDetailView: View {
             switch panel {
             case .files(let files): self.files = files
             case .conversation(let conversation):
-                self.conversation = conversation
-                conversationPage = min(conversationPage, lastConversationPage(threadCount: conversation.threads.count))
+                if !submittedReviews.isEmpty {
+                    let loadedIDs = Set(conversation.threads.map(\.id))
+                    submittedReviews = submittedReviews.filter { !loadedIDs.contains($0.key) }
+                }
+                updateConversation(conversation.includingSubmittedReviews(Array(submittedReviews.values)))
             }
         } catch {
             if !Task.isCancelled { self.error = error.localizedDescription }
@@ -291,7 +337,10 @@ struct PullDetailView: View {
 
     private func detailTab(_ name: String, icon: String, fileTab: Bool) -> some View {
         let active = showFiles == fileTab
-        return Button { showFiles = fileTab } label: {
+        return Button {
+            if fileTab { revealedReview = nil }
+            showFiles = fileTab
+        } label: {
             Label(name, systemImage: icon).font(.system(size: 12, weight: .semibold)).padding(.vertical, 7)
                 .foregroundStyle(active ? PullStyle.mint : .secondary)
                 .overlay(alignment: .bottom) { if active { Rectangle().fill(PullStyle.mint).frame(height: 2) } }
@@ -338,7 +387,7 @@ private struct PullActivityCard: View {
                     Text(entry.user?.login ?? "GitHub").fontWeight(.semibold)
                     Text(entry.title).foregroundStyle(accent).font(.callout)
                     Spacer(minLength: 4)
-                    if let date = entry.submittedAt ?? entry.createdAt {
+                    if let date = entry.date {
                         Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption2).foregroundStyle(.secondary)
                     }
                 }
@@ -380,7 +429,7 @@ private struct ReviewSheet: View {
     let repo: GitHubRepository
     let pull: GitHubPull
     let login: String
-    let posted: () -> Void
+    let posted: (PullActivity?) -> Void
     @State private var decision = ReviewDecision.comment
     @State private var message = ""
     @State private var sending = false
@@ -451,8 +500,8 @@ private struct ReviewSheet: View {
         error = nil
         defer { sending = false }
         do {
-            try await api.review(decision, body: message, repo: repo, pull: pull)
-            posted()
+            let review = try await api.review(decision, body: message, repo: repo, pull: pull)
+            posted(review)
             dismiss()
         } catch { self.error = error.localizedDescription }
     }

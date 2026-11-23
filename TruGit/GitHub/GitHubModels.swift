@@ -116,6 +116,7 @@ struct PullActivity: Decodable, Identifiable, Sendable {
     let diffHunk: String?
     let createdAt: Date?
     let submittedAt: Date?
+    var date: Date? { submittedAt ?? createdAt }
     var key: String {
         let kind = path != nil ? "inline" : state == nil ? "comment" : "review"
         return "\(kind)-\(id)"
@@ -129,6 +130,10 @@ struct PullActivity: Decodable, Identifiable, Sendable {
         default: path == nil ? "commented" : "commented on code"
         }
     }
+
+    func precedes(_ other: Self) -> Bool {
+        (date ?? .distantPast, id) < (other.date ?? .distantPast, other.id)
+    }
 }
 
 struct PullConversation: Sendable {
@@ -139,6 +144,17 @@ struct PullConversation: Sendable {
     }
 
     let threads: [Thread]
+
+    func includingSubmittedReviews(_ reviews: [PullActivity]) -> Self {
+        guard !reviews.isEmpty else { return self }
+        let existing = Set(threads.map(\.id))
+        var updated = threads
+        for review in reviews.sorted(by: { $0.precedes($1) }) where !existing.contains(review.key) {
+            let index = updated.firstIndex { review.precedes($0.entry) } ?? updated.endIndex
+            updated.insert(Thread(entry: review, replies: []), at: index)
+        }
+        return Self(threads: updated)
+    }
 
     nonisolated static func build(from activity: [PullActivity]) async -> Self {
         var seen = Set<String>()
