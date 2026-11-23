@@ -6,6 +6,12 @@ struct RepositoryView: View {
     @AppStorage("repositorySidebarExpanded") private var sidebarExpanded = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    private var repositoryReadyForFetch: URL? {
+        guard scenePhase == .active, !model.isLaunching, !model.isLoading else { return nil }
+        return model.activeID
+    }
 
     var body: some View {
         ZStack {
@@ -44,6 +50,9 @@ struct RepositoryView: View {
             model.restoreSession(minimumDisplayTime: launchAnimation ? duration : .zero)
         }
         .task(id: model.activeID) { await model.observeActiveRepository() }
+        .onChange(of: repositoryReadyForFetch, initial: true) { _, repository in
+            if repository != nil { model.fetchActiveRepositoryInBackground() }
+        }
         .sheet(isPresented: $model.showingClone) { CloneRepositorySheet(model: model).zoomAppDialog() }
         .sheet(item: $model.initialization) { review in
             InitializationSheet(review: review, cancel: { model.initialization = nil }) { selected in

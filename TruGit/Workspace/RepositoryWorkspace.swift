@@ -316,11 +316,11 @@ struct RepositoryWorkspace: View {
     private func diffView(_ diff: DiffSelection) -> some View {
         if diff.request.source == .workingTree(.conflict), let integration = snapshot.repository.integration {
             ConflictDiffView(request: diff.request, integration: integration, branch: snapshot.repository.branch,
-                             snapshotID: snapshot.id, busy: !canChangeBranch,
+                             snapshotID: snapshot.worktreeRevision, busy: !canChangeBranch,
                              save: { performBranchAction(.resolve($0, $1)) }, close: { tab.diff = nil })
                 .id(diff.request.id)
         } else {
-            DiffView(selection: diff, snapshotID: snapshot.id, chooseSource: chooseDiffSource, close: { tab.diff = nil })
+            DiffView(selection: diff, snapshotID: snapshot.worktreeRevision, chooseSource: chooseDiffSource, close: { tab.diff = nil })
                 .id(diff.request.id)
         }
     }

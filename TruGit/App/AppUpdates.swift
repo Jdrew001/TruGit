@@ -108,6 +108,7 @@ struct UpdateSettings: View {
 
 struct AppStatusBar: View {
     @EnvironmentObject private var updates: AppUpdates
+    let fetchStatus: RepositoryFetchStatus?
     let openFeedback: (FeedbackKind) -> Void
 
     var body: some View {
@@ -122,6 +123,9 @@ struct AppStatusBar: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
 
+            if let fetchStatus {
+                RepositoryFetchIndicator(status: fetchStatus)
+            }
             Spacer()
             Text(AppVersion.display).foregroundStyle(.secondary)
             if updates.configured {
@@ -154,6 +158,31 @@ struct AppStatusBar: View {
                 .foregroundStyle(.secondary)
                 .disabled(!updates.canCheck)
                 .help("Check for Updates")
+        }
+    }
+}
+
+private struct RepositoryFetchIndicator: View {
+    let status: RepositoryFetchStatus
+
+    var body: some View {
+        indicator
+            .lineLimit(1)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("repository-fetch-status")
+    }
+
+    @ViewBuilder
+    private var indicator: some View {
+        switch status {
+        case .fetching:
+            Label("Fetching remotes…", systemImage: "arrow.down.circle")
+        case .fetched(let date):
+            Label("Remotes fetched", systemImage: "checkmark.circle")
+                .help("Last fetched \(date.formatted(date: .abbreviated, time: .shortened))")
+        case .unavailable:
+            Label("Auto-fetch unavailable", systemImage: "exclamationmark.circle")
+                .help("Use Fetch All Remotes in the Actions menu to try manually.")
         }
     }
 }

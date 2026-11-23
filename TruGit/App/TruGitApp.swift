@@ -13,7 +13,7 @@ struct TruGitApp: App {
             AppZoomViewport {
                 RepositoryView(model: model)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
-                        AppStatusBar { feedback = $0 }
+                        AppStatusBar(fetchStatus: model.activeFetchStatus) { feedback = $0 }
                     }
                     .sheet(item: $feedback) { kind in
                         FeedbackView(kind: kind).zoomAppDialog()

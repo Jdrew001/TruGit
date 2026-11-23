@@ -25,11 +25,12 @@ final class PushTests: TruGitUITestCase {
         let remote = try trackedRemote()
         let clone = repository.root.appendingPathComponent(".git/peer").path
         try repository.git("clone", remote.path, clone)
+        launch()
+        expectFetchStatus("Remotes fetched")
         try repository.git("-C", clone, "commit", "--allow-empty", "-m", "Incoming change")
         try repository.git("-C", clone, "push")
         let incoming = try repository.git("-C", clone, "rev-parse", "HEAD")
         let old = try repository.git("rev-parse", "HEAD")
-        launch()
         app.menuButtons["Actions"].click()
         app.menuItems["Fetch All Remotes"].click()
         expectSuccess("Fetch succeeded")
@@ -38,6 +39,53 @@ final class PushTests: TruGitUITestCase {
         clickVisible(app.buttons["Pull"])
         expectSuccess("Pulled changes into main")
         expectGit(incoming, ["rev-parse", "HEAD"])
+    }
+
+    func testOpeningRepositoryFetchesWithoutBlockingWorkspace() throws {
+        let remote = try trackedRemote()
+        let gitFolder = remote.deletingLastPathComponent()
+        let peer = gitFolder.appendingPathComponent("peer").path
+        try repository.git("clone", remote.path, peer)
+        try repository.git("-C", peer, "commit", "--allow-empty", "-m", "Background arrival")
+        try repository.git("-C", peer, "push")
+        let incoming = try repository.git("-C", peer, "rev-parse", "HEAD")
+        let old = try repository.git("rev-parse", "HEAD")
+        try repository.write("notes.txt", "Work in progress")
+        let changes = try repository.git("status", "--porcelain")
+
+        let release = gitFolder.appendingPathComponent("allow-fetch")
+        let delay = """
+        for attempt in $(seq 1 150); do
+            if test -f "$1/../allow-fetch"; then exec /usr/bin/git-upload-pack "$@"; fi
+            sleep 0.2
+        done
+        exit 1
+        """
+        try repository.git("config", "remote.origin.uploadpack", "/bin/sh -c '\(delay)' upload-pack")
+
+        launch()
+        expectFetchStatus("Fetching remotes…")
+        XCTAssertEqual(try repository.git("rev-parse", "origin/main"), old)
+        clickVisible(app.buttons["Search"])
+        XCTAssertTrue(app.textFields["Search commit messages on all branches"].exists)
+        app.typeKey(.escape, modifierFlags: [])
+        clickVisible(app.buttons["notes.txt, Untracked"])
+        expectText("Work in progress")
+
+        try Data().write(to: release)
+        expectFetchStatus("Remotes fetched")
+        expectGit(incoming, ["rev-parse", "origin/main"])
+        XCTAssertTrue(app.buttons["Back to changed files"].exists)
+        expectText("Work in progress")
+        XCTAssertEqual(try repository.git("rev-parse", "HEAD"), old)
+        XCTAssertEqual(try repository.git("status", "--porcelain"), changes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: gitFolder.appendingPathComponent("FETCH_HEAD").path))
+    }
+
+    private func expectFetchStatus(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
+        let status = app.descendants(matching: .any).matching(identifier: "repository-fetch-status")
+            .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", text, text)).firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 10), "Missing fetch status: " + text, file: file, line: line)
     }
 
     func testCombinedCommitCanSetUpItsFirstRemote() throws {

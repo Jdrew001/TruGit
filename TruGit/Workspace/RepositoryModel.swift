@@ -3,6 +3,7 @@ import Observation
 
 struct RepositorySnapshot: Identifiable, Sendable {
     let id = UUID()
+    var worktreeRevision = UUID()
     let repository: GitRepository
     let references: [RepositoryReference]
     let referenceBadges: [GraphReferenceBadge]
@@ -11,6 +12,9 @@ struct RepositorySnapshot: Identifiable, Sendable {
     let remotes: [String]
     let stashes: [GitStash]
     let colors: BranchColors
+
+    // Git lists the main worktree first. Linked checkouts share its tracking refs.
+    var fetchGroup: URL { worktrees.first?.id ?? repository.root }
 
     func isCheckedOut(_ reference: RepositoryReference) -> Bool {
         reference.kind == .local && reference.name == repository.branch
@@ -84,6 +88,21 @@ struct RepositorySnapshot: Identifiable, Sendable {
     }
 }
 
+enum RepositoryFetchStatus {
+    case fetching
+    case fetched(Date)
+    case unavailable(Date)
+
+    private static let retryInterval: TimeInterval = 5 * 60
+
+    var isDue: Bool {
+        switch self {
+        case .fetching: false
+        case .fetched(let date), .unavailable(let date): Date.now.timeIntervalSince(date) >= Self.retryInterval
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class RepositoryModel {
@@ -122,6 +141,7 @@ final class RepositoryModel {
     private(set) var tabs: [RepositoryTab] = []
     private(set) var activeID: URL?
     private(set) var isLoading = false
+    private var automaticFetches: [URL: RepositoryFetchStatus] = [:]
     struct Success: Identifiable {
         let id = UUID()
         let message: String
@@ -192,6 +212,26 @@ final class RepositoryModel {
 
     var activeTab: RepositoryTab? {
         tabs.first { $0.id == activeID }
+    }
+
+    var activeFetchStatus: RepositoryFetchStatus? {
+        guard let snapshot = activeTab?.snapshot, !snapshot.remotes.isEmpty else { return nil }
+        return automaticFetches[snapshot.fetchGroup]
+    }
+
+    func fetchActiveRepositoryInBackground() {
+        guard !isLoading, let tab = activeTab, !tab.snapshot.remotes.isEmpty else { return }
+        let group = tab.snapshot.fetchGroup
+        guard automaticFetches[group]?.isDue ?? true else { return }
+        automaticFetches[group] = .fetching
+        Task(priority: .utility) {
+            do {
+                try await GitRepository.fetchInBackground(in: tab.id)
+                automaticFetches[group] = .fetched(.now)
+            } catch {
+                automaticFetches[group] = .unavailable(.now)
+            }
+        }
     }
 
     enum FolderAction {
@@ -390,7 +430,7 @@ final class RepositoryModel {
             guard !Task.isCancelled else { break }
             guard !isLoading else { continue }
             let original = tab.snapshot
-            let latest: RepositorySnapshot
+            var latest: RepositorySnapshot
             do {
                 latest = try await Self.readSnapshot(at: tab.id)
             } catch {
@@ -406,6 +446,9 @@ final class RepositoryModel {
             guard !Task.isCancelled, !isLoading, tab.snapshot.id == original.id else { continue }
             if latest.repository != original.repository || latest.references != original.references ||
                 latest.operationTitle != original.operationTitle || latest.worktrees != original.worktrees || latest.stashes != original.stashes || latest.remotes != original.remotes {
+                if latest.repository == original.repository && latest.operationTitle == original.operationTitle {
+                    latest.worktreeRevision = original.worktreeRevision
+                }
                 tab.snapshot = latest
             }
         }

@@ -57,6 +57,25 @@ struct GitRepository: Equatable, Sendable {
         return try parseStatus(status, root: root, integration: integration)
     }
 
+    static func fetchInBackground(in root: URL) async throws {
+        var environment = [
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_ASKPASS": "/usr/bin/false",
+            "SSH_ASKPASS_REQUIRE": "never",
+            "GIT_ALLOW_PROTOCOL": "https:http:ssh:git:file",
+        ]
+        let customSSH = try await git(["config", "--get", "core.sshCommand"], in: root, accepting: [0, 1])
+        if customSSH.isEmpty {
+            environment["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+        }
+        // Leave FETCH_HEAD available to a concurrent Pull, and skip cleanup work.
+        _ = try await git([
+            "-c", "credential.interactive=false", "-c", "http.lowSpeedLimit=1", "-c", "http.lowSpeedTime=20",
+            "fetch", "--all", "--atomic", "--no-write-fetch-head", "--no-recurse-submodules",
+            "--no-auto-maintenance", "--no-prune", "--no-prune-tags",
+        ], in: root, environment: environment)
+    }
+
     static func git(_ arguments: [String], in folder: URL,
                     accepting exitCodes: Set<Int32> = [0], environment: [String: String] = [:],
                     standardInput: FileHandle = .nullDevice) async throws -> Data {
