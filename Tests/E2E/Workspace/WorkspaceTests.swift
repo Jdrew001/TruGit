@@ -64,21 +64,21 @@ final class WorkspaceTests: TruGitUITestCase {
         app.launchEnvironment["TRUGIT_REQUEST_LOG"] = receipt.path
         launch()
 
-        let version = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@",
+        let version = app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@ AND value CONTAINS %@",
                                                            "TruGit ", " · Build ")).firstMatch
-        XCTAssertTrue(version.exists)
-        let installedVersion = version.label
+        XCTAssertTrue(version.waitForExistence(timeout: 5))
+        let installedVersion = try XCTUnwrap(version.value as? String)
 
         for (action, heading, label) in [("Report a Bug", "Bug report", "bug"),
                                          ("Request a Feature", "Feature request", "enhancement")] {
-            let menu = app.descendants(matching: .any)["Feedback"].firstMatch
+            let menu = app.menuButtons["Feedback"]
             clickVisible(menu)
-            app.menuItems[action + "…"].click()
+            menu.menuItems[action + "…"].click()
 
             let submit = app.buttons["Submit Issue"]
             XCTAssertTrue(submit.waitForExistence(timeout: 5))
             XCTAssertFalse(submit.isEnabled)
-            enter("  Example feedback  ", in: app.textFields["Title"])
+            enter(" Example feedback ", in: app.textFields["Title"])
             XCTAssertFalse(submit.isEnabled)
             enter("Example details", in: app.textViews["Details"].firstMatch)
             clickVisible(submit)
