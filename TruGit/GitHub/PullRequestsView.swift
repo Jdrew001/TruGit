@@ -91,6 +91,7 @@ struct PullBrowser: View {
     @State private var loading = true
     @State private var error: String?
     @State private var revision = 0
+    @State private var detailRevision = 0
     @State private var creating = false
     @State private var preferred: Int?
     @State private var inboxWidth: CGFloat = 328
@@ -171,8 +172,11 @@ struct PullBrowser: View {
     @ViewBuilder
     private var detail: some View {
         if let selected {
-            PullDetailView(api: api, repo: repo, number: selected, login: login, refresh: revision)
-                .id(selected)
+            PullDetailView(api: api, repo: repo, number: selected, login: login, refresh: detailRevision) { number in
+                if filter == "open" { rows.removeAll { $0.number == number } }
+                revision += 1
+            }
+            .id(selected)
         } else {
             ContentUnavailableView("Select a pull request", systemImage: "arrow.triangle.pull",
                                    description: Text("Open a pull request to review its code and conversation."))
@@ -266,7 +270,10 @@ struct PullBrowser: View {
 
     private var listActions: some View {
         HStack(spacing: 8) {
-            inboxButton("Refresh pull requests", icon: "arrow.clockwise") { revision += 1 }
+            inboxButton("Refresh pull requests", icon: "arrow.clockwise") {
+                revision += 1
+                detailRevision += 1
+            }
             Button { creating = true } label: { Label("New PR", systemImage: "plus") }
                 .buttonStyle(PullPrimaryButton())
         }

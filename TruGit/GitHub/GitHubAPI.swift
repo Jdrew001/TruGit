@@ -19,6 +19,8 @@ private final class NoGitHubRedirect: NSObject, URLSessionTaskDelegate {
 }
 
 struct GitHubAPI: Sendable {
+    private enum Method: String { case get = "GET", post = "POST", patch = "PATCH" }
+
     private let token: String
     private let session: URLSession
 
@@ -27,12 +29,13 @@ struct GitHubAPI: Sendable {
         self.session = session
     }
 
-    private func request(_ path: [String], query: [URLQueryItem] = [], body: Data? = nil) async throws -> (Data, HTTPURLResponse) {
+    private func request(_ path: [String], query: [URLQueryItem] = [], method: Method = .get,
+                         body: Data? = nil) async throws -> (Data, HTTPURLResponse) {
         let base = URL(string: "https://api.github.com")!
         let url = path.reduce(base) { $0.appendingPathComponent($1) }.appending(queryItems: query)
         var request = URLRequest(url: url)
         if body == nil { request.timeoutInterval = 30 }
-        request.httpMethod = body == nil ? "GET" : "POST"
+        request.httpMethod = method.rawValue
         request.httpBody = body
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -130,6 +133,16 @@ struct GitHubAPI: Sendable {
         try decode(await request(repo.endpoint + ["pulls", String(number)]).0)
     }
 
+    func closePull(_ repo: GitHubRepository, _ number: Int) async throws -> GitHubPull {
+        let body = try JSONEncoder().encode(["state": "closed"])
+        let (data, _) = try await request(repo.endpoint + ["pulls", String(number)], method: .patch, body: body)
+        let pull: GitHubPull = try decode(data)
+        guard pull.number == number, pull.state == "closed" else {
+            throw GitHubFailure("GitHub did not confirm that this pull request closed. Refresh and check its status.")
+        }
+        return pull
+    }
+
     func activity(_ repo: GitHubRepository, _ number: Int) async throws -> [PullActivity] {
         let path = repo.endpoint + ["pulls", String(number)]
         async let conversation: [PullActivity] = all(repo.endpoint + ["issues", String(number), "comments"])
@@ -162,7 +175,7 @@ struct GitHubAPI: Sendable {
             fields["head"] = headRepo.owner + ":" + head
             fields["head_repo"] = headRepo.name
         }
-        return try decode(await request(baseRepo.endpoint + ["pulls"], body: JSONEncoder().encode(fields)).0)
+        return try decode(await request(baseRepo.endpoint + ["pulls"], method: .post, body: JSONEncoder().encode(fields)).0)
     }
 
     func createIssue(in repo: GitHubRepository, title: String, body: String, label: String) async throws -> Int {
@@ -174,7 +187,7 @@ struct GitHubAPI: Sendable {
         struct CreatedIssue: Decodable { let number: Int }
 
         let issue = NewIssue(title: title, body: body, labels: [label])
-        let (data, _) = try await request(repo.endpoint + ["issues"], body: JSONEncoder().encode(issue))
+        let (data, _) = try await request(repo.endpoint + ["issues"], method: .post, body: JSONEncoder().encode(issue))
         let created: CreatedIssue = try decode(data)
         return created.number
     }
@@ -182,7 +195,7 @@ struct GitHubAPI: Sendable {
     func comment(_ body: String, repo: GitHubRepository, number: Int, replyingTo: Int? = nil) async throws {
         let path = replyingTo.map { ["pulls", String(number), "comments", String($0), "replies"] }
             ?? ["issues", String(number), "comments"]
-        _ = try await request(repo.endpoint + path, body: JSONEncoder().encode(["body": body]))
+        _ = try await request(repo.endpoint + path, method: .post, body: JSONEncoder().encode(["body": body]))
     }
 
     func review(_ decision: ReviewDecision, body: String, repo: GitHubRepository, pull: GitHubPull) async throws {
@@ -191,6 +204,6 @@ struct GitHubAPI: Sendable {
             throw GitHubFailure("The pull request changed. Refresh and review the latest changes before submitting.")
         }
         let fields = ["event": decision.rawValue, "body": body, "commit_id": pull.head.sha]
-        _ = try await request(repo.endpoint + ["pulls", String(pull.number), "reviews"], body: JSONEncoder().encode(fields))
+        _ = try await request(repo.endpoint + ["pulls", String(pull.number), "reviews"], method: .post, body: JSONEncoder().encode(fields))
     }
 }

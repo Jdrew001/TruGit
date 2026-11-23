@@ -35,14 +35,20 @@ final class GitHubFixtureProtocol: URLProtocol {
             var headers: [String: String] = [:]
             var delayMilliseconds = 0
             let payload: Any
-            if request.httpMethod == "POST" {
+            if let method = request.httpMethod, method == "POST" || method == "PATCH" {
                 guard let ledger = ProcessInfo.processInfo.environment["TRUGIT_REQUEST_LOG"],
                       let writes = responses["writes"] as? [String: Any], let result = writes[route] else {
                     throw URLError(.unsupportedURL)
                 }
                 let fields = try JSONSerialization.jsonObject(with: try bodyData())
-                let receipt: [String: Any] = ["path": route, "fields": fields]
+                let receipt: [String: Any] = ["method": method, "path": route, "fields": fields]
                 try JSONSerialization.data(withJSONObject: receipt).write(to: URL(fileURLWithPath: ledger), options: .atomic)
+                if method == "PATCH" {
+                    var updated = responses
+                    updated["pull"] = result
+                    try JSONSerialization.data(withJSONObject: updated)
+                        .write(to: URL(fileURLWithPath: fixture), options: .atomic)
+                }
                 payload = result
             } else if let response = searchKey.flatMap({ pages?[$0] }) ?? pages?[pageKey], let body = response["body"] {
                 status = response["status"] as? Int ?? 200
@@ -54,7 +60,8 @@ final class GitHubFixtureProtocol: URLProtocol {
             } else {
                 switch route {
                 case "/repos/example/review/pulls":
-                    payload = state == "closed" ? [] : [pull]
+                    let pullState = (pull as? [String: Any])?["state"] as? String
+                    payload = state == pullState ? [pull] : []
                 case "/repos/example/review/pulls/42": payload = pull
                 case "/repos/example/review/pulls/42/files": payload = files
                 default: throw URLError(.resourceUnavailable)

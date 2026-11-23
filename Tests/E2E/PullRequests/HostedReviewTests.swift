@@ -20,14 +20,43 @@ final class HostedReviewTests: TruGitUITestCase {
         expectText("0 of 3 reviewed")
     }
 
-    private func checkRequest(_ suffix: String, fields: [String: String]) throws {
+    private func checkRequest(_ suffix: String, method: String = "POST", fields: [String: String]) throws {
         let written = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             FileManager.default.fileExists(atPath: self.receipt.path)
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [written], timeout: 8), .completed)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: receipt)) as? [String: Any])
+        XCTAssertEqual(json["method"] as? String, method)
         XCTAssertEqual(json["path"] as? String, "/repos/example/review/" + suffix)
         XCTAssertEqual(json["fields"] as? [String: String], fields)
+    }
+
+    func testClosingRequiresConfirmationAndMovesPullRequestToClosed() throws {
+        var data = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: Any])
+        var closed = try XCTUnwrap(data["pull"] as? [String: Any])
+        closed["state"] = "closed"
+        var writes = try XCTUnwrap(data["writes"] as? [String: Any])
+        writes["/repos/example/review/pulls/42"] = closed
+        data["writes"] = writes
+        try JSONSerialization.data(withJSONObject: data).write(to: fixture, options: .atomic)
+
+        openPR()
+        let close = app.buttons["Close pull request…"]
+        clickVisible(close)
+        clickVisible(app.buttons["Cancel"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: receipt.path))
+
+        clickVisible(close)
+        clickVisible(app.buttons["Close Pull Request"])
+        try checkRequest("pulls/42", method: "PATCH", fields: ["state": "closed"])
+        expectText("No open pull requests")
+        XCTAssertFalse(close.exists)
+        XCTAssertFalse(app.buttons["Submit review…"].isEnabled)
+
+        clickVisible(app.radioButtons["Closed"])
+        let item = app.buttons["pull-request-42"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        XCTAssertTrue(item.label.hasSuffix("Closed"))
     }
 
     func testCommentAndReplyGoToTheirOwnThreads() throws {
@@ -179,26 +208,47 @@ final class HostedReviewTests: TruGitUITestCase {
                  "in_reply_to_id": 3, "body": "Reply number \(index)"]
             }
             let long = "Long review message\n" + String(repeating: "**Detail** with `inline code`.\n", count: 1_200)
-            let conversation: [[String: Any]] = (0..<100).map { index in
+            let conversation: [[String: Any]] = (0..<400).map { index in
                 ["id": 1_000 + index, "user": ["login": "reviewer"], "body": index == 0 ? long : "Discussion \(index)"]
             }
             let inline = "/repos/example/review/pulls/42/comments||"
-            return [
+            var pages: [String: Any] = [
                 inline + "1": ["body": [root] + Array(replies.prefix(99)),
                                 "headers": ["Link": "<https://api.github.com/next>; rel=\"next\""]],
                 inline + "2": ["body": Array(replies.dropFirst(99))],
-                "/repos/example/review/issues/42/comments||1": ["body": conversation],
             ]
+            for page in 0..<4 {
+                var response: [String: Any] = ["body": Array(conversation[(page * 100)..<((page + 1) * 100)])]
+                if page < 3 { response["headers"] = ["Link": "<https://api.github.com/next>; rel=\"next\""] }
+                pages["/repos/example/review/issues/42/comments||\(page + 1)"] = response
+            }
+            return pages
         }
         openPR()
         clickVisible(app.buttons["Conversation"])
+        expectText("Threads 1–25 of 401")
         expectText("Thread for large review")
         expectText("Reply number 3")
         XCTAssertFalse(app.staticTexts["Reply number 4"].exists)
+        app.scrollViews["pull-request-conversation"].scroll(byDeltaX: 0, deltaY: -180)
         clickVisible(app.links["Show 12 more replies"])
         expectText("Reply number 4")
+
+        clickVisible(app.buttons["Latest threads"])
+        expectText("Discussion 399")
+        XCTAssertFalse(app.staticTexts["Thread for large review"].exists)
+        clickVisible(app.buttons["Previous threads"])
+        expectText("Threads 376–400 of 401")
+        expectText("Discussion 374")
+        clickVisible(app.buttons["Next threads"])
+        expectText("Discussion 399")
+
         clickVisible(app.buttons["Files changed"])
         expectText("Sources/Alpha.swift")
+        clickVisible(app.buttons["Conversation"])
+        expectText("Discussion 399")
+        clickVisible(app.buttons["First threads"])
+        expectText("Thread for large review")
     }
 
     func testLargePatchAndMissingPatchAreBothNavigable() throws {

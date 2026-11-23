@@ -1,13 +1,17 @@
 import SwiftUI
 
 struct PullDetailView: View {
+    private static let threadsPerPage = 25
+
     let api: GitHubAPI
     let repo: GitHubRepository
     let number: Int
     let login: String
     let refresh: Int
+    let didClose: (Int) -> Void
     @State private var pull: GitHubPull?
     @State private var conversation = PullConversation(threads: [])
+    @State private var conversationPage = 0
     @State private var files: [ReviewFile] = []
     @State private var selectedFile: String?
     @State private var showFiles = true
@@ -19,6 +23,10 @@ struct PullDetailView: View {
     @State private var revision = 0
     @State private var error: String?
     @State private var commentError: String?
+    @State private var confirmingClose = false
+    @State private var closing = false
+    @State private var closeError: String?
+    @State private var statusRevision = 0
 
     var body: some View {
         let request = DetailQuery(refresh: refresh, revision: revision, files: showFiles)
@@ -34,6 +42,13 @@ struct PullDetailView: View {
                     Button("Reload") { revision += 1 }
                 }.padding(8)
             }
+            if let closeError {
+                HStack {
+                    Text(closeError).font(.callout).foregroundStyle(PullStyle.amber).textSelection(.enabled)
+                    Spacer()
+                    Button("Dismiss") { self.closeError = nil }
+                }.padding(8)
+            }
             if loading && pull == nil {
                 ProgressView("Loading pull request…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -46,28 +61,7 @@ struct PullDetailView: View {
                     ContentUnavailableView("No changed files", systemImage: "doc")
                 }
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        if let pull {
-                            if let body = pull.body, !body.isEmpty {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Description").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                                    PullMessage(body)
-                                }.padding(14).frame(maxWidth: .infinity, alignment: .leading).pullCard()
-                            }
-                            ForEach(conversation.threads) { thread in
-                                PullActivityCard(entry: thread.entry, replies: thread.replies, canReply: !sending, reply: { replyTo = $0 })
-                            }
-                            if conversation.threads.isEmpty {
-                                if loading {
-                                    ProgressView("Loading conversation…").controlSize(.small)
-                                } else if error == nil {
-                                    Text("No comments or reviews yet").foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
-                }
+                conversationPanel
             }
             if !showFiles && pull != nil {
                 Divider()
@@ -99,6 +93,12 @@ struct PullDetailView: View {
         }
         .frame(minWidth: 230, maxWidth: .infinity, maxHeight: .infinity)
         .task(id: request) { await load(request) }
+        .alert("Close pull request #\(number)?", isPresented: $confirmingClose) {
+            Button("Cancel", role: .cancel) {}
+            Button("Close Pull Request", role: .destructive) { Task { await closePull() } }
+        } message: {
+            Text("GitHub will close this pull request without merging it.")
+        }
         .sheet(item: $reviewTarget) { reviewed in
             ReviewSheet(api: api, repo: repo, pull: reviewed, login: login) {
                 showFiles = false
@@ -108,7 +108,67 @@ struct PullDetailView: View {
         }
     }
 
+    private var conversationPanel: some View {
+        let count = conversation.threads.count
+        let lastPage = lastConversationPage(threadCount: count)
+        let page = min(conversationPage, lastPage)
+        let start = page * Self.threadsPerPage
+        let end = min(start + Self.threadsPerPage, count)
+
+        return VStack(spacing: 0) {
+            if lastPage > 0 {
+                conversationNavigation(range: start..<end, total: count, page: page, lastPage: lastPage)
+                Divider()
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    if page == 0, let body = pull?.body, !body.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Description").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            PullMessage(body)
+                        }.padding(14).frame(maxWidth: .infinity, alignment: .leading).pullCard()
+                    }
+                    ForEach(conversation.threads[start..<end]) { thread in
+                        PullActivityCard(entry: thread.entry, replies: thread.replies, canReply: !sending) { replyTo = $0 }
+                    }
+                    if pull != nil && count == 0 {
+                        if loading {
+                            ProgressView("Loading conversation…").controlSize(.small)
+                        } else if error == nil {
+                            Text("No comments or reviews yet").foregroundStyle(.secondary)
+                        }
+                    }
+                }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .accessibilityIdentifier("pull-request-conversation")
+            .id(page)
+        }
+    }
+
+    private func lastConversationPage(threadCount: Int) -> Int {
+        max(0, threadCount - 1) / Self.threadsPerPage
+    }
+
+    private func conversationNavigation(range: Range<Int>, total: Int, page: Int, lastPage: Int) -> some View {
+        HStack(spacing: 10) {
+            Text("Threads \(range.lowerBound + 1)–\(range.upperBound) of \(total)")
+                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button("First threads", systemImage: "chevron.left.to.line") { conversationPage = 0 }
+                .help("First threads").disabled(page == 0)
+            Button("Previous threads", systemImage: "chevron.left") { conversationPage = page - 1 }
+                .help("Previous threads").disabled(page == 0)
+            Button("Next threads", systemImage: "chevron.right") { conversationPage = page + 1 }
+                .help("Next threads").disabled(page == lastPage)
+            Button("Latest threads", systemImage: "chevron.right.to.line") { conversationPage = lastPage }
+                .help("Latest threads").disabled(page == lastPage)
+        }
+        .labelStyle(.iconOnly).buttonStyle(.borderless).controlSize(.small)
+        .padding(.horizontal, 18).padding(.vertical, 7).background(PullStyle.rail)
+    }
+
     private func load(_ request: DetailQuery) async {
+        let originalStatusRevision = statusRevision
         loading = true
         error = nil
         defer { if !Task.isCancelled { loading = false } }
@@ -116,15 +176,32 @@ struct PullDetailView: View {
             async let pending = loadPanel(files: request.files)
             let latest = try await api.pull(repo, number)
             try Task.checkCancellation()
-            pull = latest
+            if statusRevision == originalStatusRevision { pull = latest }
             let panel = try await pending
             try Task.checkCancellation()
             switch panel {
             case .files(let files): self.files = files
-            case .conversation(let conversation): self.conversation = conversation
+            case .conversation(let conversation):
+                self.conversation = conversation
+                conversationPage = min(conversationPage, lastConversationPage(threadCount: conversation.threads.count))
             }
         } catch {
             if !Task.isCancelled { self.error = error.localizedDescription }
+        }
+    }
+
+    private func closePull() async {
+        guard pull?.state == "open", !closing, !sending else { return }
+        closing = true
+        closeError = nil
+        defer { closing = false }
+        do {
+            let closed = try await api.closePull(repo, number)
+            statusRevision += 1
+            pull = closed
+            didClose(number)
+        } catch {
+            closeError = error.localizedDescription
         }
     }
 
@@ -148,7 +225,15 @@ struct PullDetailView: View {
                 Text("#\(number)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 PullStatus(status: pull.status)
                 Spacer()
-                if loading { ProgressView().controlSize(.small).accessibilityLabel("Refreshing pull request") }
+                if closing || loading {
+                    ProgressView().controlSize(.small)
+                        .accessibilityLabel(closing ? "Closing pull request" : "Refreshing pull request")
+                }
+                if pull.state == "open" {
+                    Button("Close pull request…", systemImage: "xmark.circle") { confirmingClose = true }
+                        .font(.caption).buttonStyle(.borderless)
+                        .disabled(closing || loading || sending)
+                }
                 Link(destination: URL(string: "https://github.com/" + repo.id + "/pull/\(number)")!) {
                     Label("GitHub", systemImage: "arrow.up.right.square")
                 }
@@ -169,7 +254,7 @@ struct PullDetailView: View {
                 Spacer()
                 Button { reviewTarget = pull } label: { Label("Submit review…", systemImage: "checkmark.bubble") }
                     .buttonStyle(PullPrimaryButton())
-                    .disabled(pull.state != "open" || loading || sending || error != nil)
+                    .disabled(pull.state != "open" || closing || loading || sending || error != nil)
             }
             .padding(.top, 4)
         }
