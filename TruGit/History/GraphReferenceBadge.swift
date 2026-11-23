@@ -52,6 +52,7 @@ struct BranchLocationLabel<MenuItems: View>: View {
     let repository: URL
     var checkedOut = false
     var wraps = false
+    var displayName: String?
     let select: (RepositoryReference) -> Void
     let checkout: (RepositoryReference) -> Void
     let drop: (BranchDrag, RevisionPoint) -> Bool
@@ -64,7 +65,7 @@ struct BranchLocationLabel<MenuItems: View>: View {
                     if checkedOut {
                         Image(systemName: "checkmark").fontWeight(.bold).frame(width: 11)
                     }
-                    Text(verbatim: badge.name)
+                    Text(verbatim: displayName ?? badge.name)
                         .lineLimit(wraps ? nil : 1)
                         .fixedSize(horizontal: false, vertical: wraps)
                         .truncationMode(.tail)

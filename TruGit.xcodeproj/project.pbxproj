@@ -13,6 +13,7 @@
 		A00000000000000000000012 /* GitHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* GitHistory.swift */; };
 		A00000000000000000000014 /* CommitGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000015 /* CommitGraph.swift */; };
 		A00000000000000000000016 /* RepositoryWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000017 /* RepositoryWorkspace.swift */; };
+		BD571A500E05489BA4F06D54 /* SidebarBranches.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD571A500E05489BA4F06D55 /* SidebarBranches.swift */; };
 		A00000000000000000000018 /* GitDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000019 /* GitDiff.swift */; };
 		A0000000000000000000001A /* DiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001B /* DiffView.swift */; };
 		A0000000000000000000001C /* RepositoryTabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001D /* RepositoryTabs.swift */; };
@@ -129,6 +130,7 @@
 		A00000000000000000000013 /* GitHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHistory.swift; sourceTree = "<group>"; };
 		A00000000000000000000015 /* CommitGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitGraph.swift; sourceTree = "<group>"; };
 		A00000000000000000000017 /* RepositoryWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryWorkspace.swift; sourceTree = "<group>"; };
+		BD571A500E05489BA4F06D55 /* SidebarBranches.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarBranches.swift; sourceTree = "<group>"; };
 		A00000000000000000000019 /* GitDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiff.swift; sourceTree = "<group>"; };
 		A0000000000000000000001B /* DiffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffView.swift; sourceTree = "<group>"; };
 		A0000000000000000000001D /* RepositoryTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryTabs.swift; sourceTree = "<group>"; };
@@ -332,6 +334,7 @@
 				000000000000000000000057 /* WorkspaceScrollView.swift */,
 				000000000000000000000054 /* RepositoryClone.swift */,
 				A00000000000000000000017 /* RepositoryWorkspace.swift */,
+				BD571A500E05489BA4F06D55 /* SidebarBranches.swift */,
 				A10000000000000000000011 /* GitRepository.swift */,
 				A00000000000000000000135 /* RepositoryEvents.swift */,
 			);
@@ -674,6 +677,7 @@
 				A0000000000000000000001A /* DiffView.swift in Sources */,
 				A00000000000000000000018 /* GitDiff.swift in Sources */,
 				A00000000000000000000016 /* RepositoryWorkspace.swift in Sources */,
+				BD571A500E05489BA4F06D54 /* SidebarBranches.swift in Sources */,
 				A00000000000000000000014 /* CommitGraph.swift in Sources */,
 				A00000000000000000000012 /* GitHistory.swift in Sources */,
 			);

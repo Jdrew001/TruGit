@@ -1,6 +1,66 @@
 import XCTest
 
 final class BranchTests: TruGitUITestCase {
+    func testBranchFoldersAndSidebarSectionsPersistAcrossRelaunch() throws {
+        try repository.git("branch", "release/stable")
+        try repository.git("branch", "release/2026/november")
+        try repository.git("switch", "release/stable")
+        try repository.git("tag", "v1.2.3")
+        let upstream = repository.root.appendingPathComponent(".git/sidebar-origin.git")
+        try repository.git("init", "--bare", upstream.path)
+        try repository.git("remote", "add", "origin", upstream.path)
+        try repository.git("push", "origin", "HEAD:refs/heads/release/nightly")
+        try repository.git("fetch", "origin")
+
+        let sidebarFlag = try XCTUnwrap(app.launchArguments.firstIndex(of: "-repositorySidebarExpanded"))
+        app.launchArguments.removeSubrange(sidebarFlag...sidebarFlag + 1)
+        launch()
+        if app.buttons["Show Sidebar"].exists { clickVisible(app.buttons["Show Sidebar"]) }
+
+        let branches = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Branches,")).firstMatch
+        let worktrees = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Worktrees,")).firstMatch
+        let stashes = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Stashes,")).firstMatch
+        let release = app.buttons["branch-folder-release"]
+        let year = app.buttons["branch-folder-release/2026"]
+        let nightly = app.buttons["origin/release/nightly, Remote"].firstMatch
+        let november = app.buttons["release/2026/november, Local"].firstMatch
+        let tags = app.buttons["Tags, 1"]
+        XCTAssertTrue(nightly.waitForExistence(timeout: 10))
+        XCTAssertTrue(november.exists)
+        clickVisible(year)
+        XCTAssertFalse(november.exists)
+        clickVisible(release)
+        XCTAssertFalse(nightly.exists)
+        XCTAssertFalse(year.exists)
+
+        enter("november", in: app.textFields["Filter branches and tags"])
+        XCTAssertTrue(november.waitForExistence(timeout: 10))
+        clickVisible(app.buttons["Clear branch filter"])
+        XCTAssertEqual(release.value as? String, "Collapsed")
+
+        clickVisible(tags)
+        clickVisible(worktrees)
+        clickVisible(stashes)
+        clickVisible(branches)
+        clickVisible(app.buttons["Hide Sidebar"])
+        app.terminate()
+        launch()
+        XCTAssertTrue(app.buttons["Show Sidebar"].waitForExistence(timeout: 10))
+        clickVisible(app.buttons["Show Sidebar"])
+
+        XCTAssertEqual(branches.value as? String, "Collapsed")
+        XCTAssertEqual(tags.value as? String, "Collapsed")
+        XCTAssertEqual(worktrees.value as? String, "Expanded")
+        XCTAssertEqual(stashes.value as? String, "Expanded")
+        clickVisible(branches)
+        XCTAssertEqual(release.value as? String, "Collapsed")
+        clickVisible(release)
+        XCTAssertTrue(nightly.waitForExistence(timeout: 10))
+        XCTAssertEqual(year.value as? String, "Collapsed")
+        clickVisible(year)
+        XCTAssertTrue(november.waitForExistence(timeout: 10))
+    }
+
     func testCreateBranchRejectsDuplicateAndSwitchesToNewBranch() throws {
         launch()
         clickVisible(app.buttons["Branch"])
