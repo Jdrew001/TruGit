@@ -10,7 +10,7 @@ struct RepositoryView: View {
 
     private var repositoryReadyForFetch: URL? {
         guard scenePhase == .active, !model.isLaunching, !model.isLoading else { return nil }
-        return model.activeID
+        return model.activeTab?.root
     }
 
     var body: some View {
@@ -49,7 +49,7 @@ struct RepositoryView: View {
             let duration = reduceMotion ? Duration.milliseconds(800) : LaunchSplash.displayTime
             model.restoreSession(minimumDisplayTime: launchAnimation ? duration : .zero)
         }
-        .task(id: model.activeID) { await model.observeActiveRepository() }
+        .task(id: model.activeTab?.root) { await model.observeActiveRepository() }
         .onChange(of: repositoryReadyForFetch, initial: true) { _, repository in
             if repository != nil { model.fetchActiveRepositoryInBackground() }
         }
@@ -65,7 +65,7 @@ struct RepositoryView: View {
                 VStack(spacing: 0) {
                     Divider()
                     let retry = failure.retry
-                    let canRetry = retry.map { context in model.tabs.contains { $0.id == context.root } } ?? false
+                    let canRetry = retry.map { context in model.canRetry(in: context.root) } ?? false
                     GitErrorDetails(title: failure.title + (retry.map { " · " + $0.root.lastPathComponent + " / " + $0.branch.name } ?? ""),
                                     message: failure.message,
                                     retry: canRetry ? { model.retryFailure(failure.id) } : nil,
@@ -86,11 +86,11 @@ struct RepositoryView: View {
             VStack(spacing: 0) {
                 RepositoryTabs(model: model, sidebarExpanded: sidebarExpanded, toggleSidebar: toggleSidebar)
                 RepositoryWorkspace(tab: tab, sidebarExpanded: sidebarExpanded,
-                                    canChangeBranch: !model.isLoading, openWorktree: { model.openFolder($0, inspectWorktree: true) }, selectTab: model.selectTab,
+                                    canChangeBranch: !model.isLoading, openWorktree: { model.switchWorktree(to: $0, in: tab) }, selectTab: model.selectTab,
                                     refresh: model.refresh, repoTabs: model.tabs, openRepository: model.openRepository) { action in
                     model.performBranchAction(action, in: tab)
                 }
-                .id(tab.id)
+                .id(tab.root)
             }
         } else if model.isLoading || model.isLaunching {
             ProgressView("Reading repository…")

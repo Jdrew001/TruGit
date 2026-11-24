@@ -5,6 +5,8 @@ struct RepositorySession {
     var paths: [String]
     var selectedPath: String?
     var aliases: [String: String]
+    var worktreePaths: [String: String]
+    var commonDirectories: [String: String]
 
     var groups: [RepositoryTabGroup]
 
@@ -12,12 +14,15 @@ struct RepositorySession {
         let saved = UserDefaults.standard.dictionary(forKey: Self.key)
         paths = saved?["paths"] as? [String] ?? []
         selectedPath = saved?["selectedPath"] as? String
+        commonDirectories = saved?["commonDirectories"] as? [String: String] ?? [:]
+        worktreePaths = saved?["worktreePaths"] as? [String: String] ?? [:]
         aliases = saved?["aliases"] as? [String: String] ?? [:]
         groups = (saved?["groups"] as? Data).flatMap { try? PropertyListDecoder().decode([RepositoryTabGroup].self, from: $0) } ?? []
     }
 
     func save() {
-        var values: [String: Any] = ["paths": paths, "aliases": aliases]
+        var values: [String: Any] = ["paths": paths, "aliases": aliases, "worktreePaths": worktreePaths,
+                                     "commonDirectories": commonDirectories]
         values["selectedPath"] = selectedPath
         values["groups"] = try? PropertyListEncoder().encode(groups)
         UserDefaults.standard.set(values, forKey: Self.key)
@@ -95,6 +100,8 @@ extension RepositorySession {
 
     mutating func removeTab(_ path: String) {
         paths.removeAll { $0 == path }
+        worktreePaths.removeValue(forKey: path)
+        commonDirectories.removeValue(forKey: path)
         setGroup(nil, for: path)
     }
 

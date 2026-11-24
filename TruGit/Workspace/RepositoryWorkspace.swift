@@ -40,7 +40,7 @@ struct RepositoryWorkspace: View {
     var body: some View {
         VStack(spacing: 0) {
             if tab.selection == .pullRequests {
-                PullRequestsView(root: tab.id, remotes: snapshot.remotes, branch: snapshot.repository.branch, showsInbox: sidebarExpanded) {
+                PullRequestsView(root: tab.root, remotes: snapshot.remotes, branch: snapshot.repository.branch, showsInbox: sidebarExpanded) {
                     tab.selection = .history
                 }
             } else {
@@ -129,16 +129,21 @@ struct RepositoryWorkspace: View {
                 .zoomAppDialog()
         }
         .sheet(item: $mergeReview) { review in
-            MergeBranchesSheet(review: review, root: tab.id, current: snapshot.repository.branch, otherWorktree: snapshot.otherWorktree,
+            MergeBranchesSheet(review: review, root: tab.root, current: snapshot.repository.branch, otherWorktree: snapshot.otherWorktree,
                                canMerge: canMoveBranches) { performBranchAction(.revision($0)) }
                 .zoomAppDialog()
         }
         .sheet(item: $revisionReview) { review in
-            RevisionActionsSheet(review: review, root: tab.id, current: snapshot.repository.branch, otherWorktree: snapshot.otherWorktree, addFromGraph: pickMoreCommits) {
+            RevisionActionsSheet(review: review, root: tab.root, current: snapshot.repository.branch, otherWorktree: snapshot.otherWorktree, addFromGraph: pickMoreCommits) {
                 performBranchAction(.revision($0))
             }
             .zoomAppDialog()
         }
+    }
+
+    private func worktreeIcon(_ worktree: GitWorktree) -> String {
+        if worktree.id == tab.root { return "checkmark" }
+        return worktree.isPrunable ? "exclamationmark.triangle" : "externaldrive"
     }
 
     private var current: RepositoryReference? {
@@ -205,7 +210,7 @@ struct RepositoryWorkspace: View {
             Divider().frame(height: 29)
             barButton("Terminal", "terminal", "Open Terminal in this repository") {
                 if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") {
-                    NSWorkspace.shared.open([tab.id], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration(), completionHandler: nil)
+                    NSWorkspace.shared.open([tab.root], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration(), completionHandler: nil)
                 }
             }
             Spacer(minLength: 4)
@@ -216,13 +221,13 @@ struct RepositoryWorkspace: View {
                 }
                 Button("Fetch All Remotes", systemImage: "arrow.down.to.line") { performBranchAction(.fetch) }.disabled(!canChangeBranch)
                 Button("Refresh Repository", action: refresh).disabled(!canChangeBranch)
-                Button("Reveal Repository in Finder") { NSWorkspace.shared.activateFileViewerSelecting([tab.id]) }
-                Button("Copy Repository Path") { copyGitText(tab.id.path) }
+                Button("Reveal Repository in Finder") { NSWorkspace.shared.activateFileViewerSelecting([tab.root]) }
+                Button("Copy Repository Path") { copyGitText(tab.root.path) }
             } label: { barLabel("Actions", "slider.horizontal.3") }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             barButton("Search", "magnifyingglass", "Search all branches by commit message") { searching.toggle() }
                 .popover(isPresented: $searching) {
-                    CommitSearch(root: tab.id) { commit in
+                    CommitSearch(root: tab.root) { commit in
                         tab.diff = nil
                         tab.commitJump = CommitJump(commitID: commit.id)
                         searching = false
@@ -340,7 +345,7 @@ struct RepositoryWorkspace: View {
                                           openChange: openWorkingTreeDiff,
                                           perform: { performBranchAction(.worktree($0)) })
                         }) { source, file in
-                let request = DiffRequest(root: tab.id, path: file.path,
+                let request = DiffRequest(root: tab.root, path: file.path,
                                           originalPath: file.originalPath, source: source)
                 tab.diff = DiffSelection(request: request, sources: [source])
             }
@@ -357,7 +362,7 @@ struct RepositoryWorkspace: View {
         }
         guard let source = preferred.flatMap({ sources.contains($0) ? $0 : nil }) ?? sources.last else { return }
 
-        let request = DiffRequest(root: tab.id, path: change.path, originalPath: change.originalPath, source: source)
+        let request = DiffRequest(root: tab.root, path: change.path, originalPath: change.originalPath, source: source)
         tab.diff = DiffSelection(request: request, sources: sources)
     }
 
@@ -399,9 +404,15 @@ struct RepositoryWorkspace: View {
                     sidebarGroup("Worktrees", "externaldrive", count: snapshot.worktrees.count, expanded: sectionExpansion("worktrees")) {
                         ForEach(snapshot.worktrees) { item in
                             Button { openWorktree(item.id) } label: {
-                                Label(item.branch, systemImage: item.id.standardizedFileURL == tab.id.standardizedFileURL ? "house" : "externaldrive")
+                                Label(item.branch, systemImage: worktreeIcon(item))
                                     .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                            }.buttonStyle(.plain).help(item.id.path).padding(.leading, 8).frame(minHeight: 24)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(item.isPrunable || !canChangeBranch)
+                            .accessibilityLabel(item.branch + ", Worktree")
+                            .accessibilityAddTraits(item.id == tab.root ? .isSelected : [])
+                            .help(item.isPrunable ? "Unavailable worktree: " + item.id.path : item.id.path)
+                            .padding(.leading, 8).frame(minHeight: 24)
                             .contextMenu {
                                 if let ref = snapshot.references.first(where: { $0.kind == .local && $0.name == item.branch }) {
                                     deletionMenu(ref)
@@ -661,7 +672,7 @@ struct RepositoryWorkspace: View {
         .frame(maxWidth: .infinity, minHeight: 23, alignment: .leading)
         .background(surface, in: RoundedRectangle(cornerRadius: 4))
         .contentShape(Rectangle())
-        .modifier(BranchDragControl(reference: ref, repository: tab.id, onSelect: selectReference, onCheckout: checkout, onDrop: proposeDrop))
+        .modifier(BranchDragControl(reference: ref, repository: tab.root, onSelect: selectReference, onCheckout: checkout, onDrop: proposeDrop))
         .contextMenu { referenceActions(ref) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(ref.name + ", " + location)
@@ -700,7 +711,7 @@ struct RepositoryWorkspace: View {
     }
 
     private func proposeDrop(_ drag: BranchDrag, onto target: RevisionPoint) -> Bool {
-        guard canMoveBranches, drag.repository == tab.id, drag.canDrop(on: target) else { return false }
+        guard canMoveBranches, drag.repository == tab.root, drag.canDrop(on: target) else { return false }
         if drag.commits.count > 1 {
             guard target.isLocal else { return false }
             let locals = snapshot.references.filter { $0.kind == .local }.map(RevisionPoint.init)
@@ -1170,7 +1181,7 @@ private struct HistoryView<ReferenceMenu: View, Center: View, Worktree: View>: V
                     locationLabel(badge)
                     Spacer(minLength: 0)
                     if ref.kind == .local && !current {
-                        Button(snapshot.otherWorktree(for: ref.name) == nil ? "Switch" : "Open") { onCheckout(ref) }
+                        Button("Switch") { onCheckout(ref) }
                             .controlSize(.mini).fixedSize().disabled(!canAct)
                             .accessibilityLabel(snapshot.checkoutTitle(for: ref)).help(snapshot.checkoutTitle(for: ref))
                     }

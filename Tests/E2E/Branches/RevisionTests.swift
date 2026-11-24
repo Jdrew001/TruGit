@@ -204,13 +204,58 @@ final class RevisionTests: TruGitUITestCase {
         XCTAssertEqual(try repository.git("show", "topic:topic.txt"), "topic")
     }
 
-    func testOpenOtherWorktreeWithoutChangingOriginalBranch() throws {
+    func testSwitchWorktreesInTheSameRepositoryTab() throws {
         let linked = repository.root.appendingPathComponent(".git/linked-checkout")
         try repository.git("worktree", "add", "-b", "linked", linked.path)
+        try "linked change".write(to: linked.appendingPathComponent("linked.txt"), atomically: true, encoding: .utf8)
         launch()
-        context("linked", "Open “linked” worktree")
-        XCTAssertTrue(app.buttons["Close linked-checkout"].waitForExistence(timeout: 10))
+
+        let originalTab = app.buttons["Close " + repository.root.lastPathComponent]
+        context("linked", "Switch to “linked” worktree")
+        expectSuccess("Switched to worktree for linked")
+        XCTAssertTrue(originalTab.exists)
+        XCTAssertFalse(app.buttons["Close linked-checkout"].exists)
+        clickVisible(app.buttons["Stage linked.txt"])
+        expectGit("linked.txt", ["-C", linked.path, "diff", "--cached", "--name-only"])
+        XCTAssertEqual(try repository.git("diff", "--cached", "--name-only"), "")
+
+        let mainWorktree = app.buttons["main, Worktree"]
+        if !mainWorktree.exists { clickVisible(app.buttons["Worktrees, 2"]) }
+        clickVisible(mainWorktree)
+        expectSuccess("Switched to worktree for main")
+        XCTAssertTrue(originalTab.exists)
+        XCTAssertFalse(app.buttons["Unstage linked.txt"].exists)
         XCTAssertEqual(try repository.git("branch", "--show-current"), "main")
         XCTAssertEqual(try repository.git("-C", linked.path, "branch", "--show-current"), "linked")
+    }
+
+    func testUnavailableWorktreeKeepsTheCurrentCheckout() throws {
+        let linked = repository.root.appendingPathComponent(".git/linked-checkout")
+        try repository.git("worktree", "add", "-b", "linked", linked.path)
+        try FileManager.default.removeItem(at: linked.appendingPathComponent(".git"))
+        launch()
+
+        context("linked", "Switch to “linked” worktree")
+        expectText("Couldn’t switch branches")
+        XCTAssertTrue(app.buttons["Close " + repository.root.lastPathComponent].exists)
+        XCTAssertFalse(app.buttons["Close linked-checkout"].exists)
+        let linkedWorktree = app.buttons["linked, Worktree"]
+        if !linkedWorktree.exists { clickVisible(app.buttons["Worktrees, 2"]) }
+        XCTAssertTrue(linkedWorktree.exists)
+        XCTAssertFalse(linkedWorktree.isEnabled)
+        XCTAssertEqual(try repository.git("branch", "--show-current"), "main")
+    }
+
+    func testRestoringSeparateWorktreeTabsKeepsTheSelectedCheckoutInOneTab() throws {
+        let linked = repository.root.appendingPathComponent(".git/linked-checkout")
+        try repository.git("worktree", "add", "-b", "linked", linked.path)
+        let root = repository.root.path
+        let session = try XCTUnwrap(app.launchArguments.firstIndex(of: "-repositorySession.v1"))
+        app.launchArguments[session + 1] = "{ paths = (\"\(root)\", \"\(linked.path)\"); selectedPath = \"\(linked.path)\"; }"
+        launch()
+
+        XCTAssertTrue(app.buttons["Close " + repository.root.lastPathComponent].exists)
+        XCTAssertFalse(app.buttons["Close linked-checkout"].exists)
+        XCTAssertTrue(app.menuButtons["Checked out, linked"].exists)
     }
 }

@@ -46,20 +46,52 @@ final class RepositoryTab: Identifiable {
     var pendingCommitBatch: CommitBatch?
     var diff: DiffSelection?
 
+    private struct WorktreeDraft {
+        let commit: CommitDraft
+        let batch: CommitBatch?
+        let undo: SwitchStep?
+        let redo: SwitchStep?
+    }
+
+    private var worktreeDrafts: [URL: WorktreeDraft] = [:]
+
+    var root: URL { snapshot.repository.root }
     var alias: String?
     var folderName: String { id.lastPathComponent.isEmpty ? id.path : id.lastPathComponent }
     var title: String { alias ?? folderName }
 
-    init(snapshot: RepositorySnapshot, alias: String? = nil) {
+    init(snapshot: RepositorySnapshot, id: URL, alias: String? = nil) {
         self.alias = alias
-        self.id = snapshot.repository.root
+        self.id = id
         self.snapshot = snapshot
-        let key = "sidebarSections.v1." + snapshot.repository.root.standardizedFileURL.path
+        let key = "sidebarSections.v1." + id.path
         sidebarPreferencesKey = key
         let saved = UserDefaults.standard.dictionary(forKey: key) as? [String: Bool] ?? [:]
         sidebarSections = SidebarBranchRow.inheritRemoteExpansion(in: saved, badges: snapshot.sidebarReferences[.remote] ?? [])
         if sidebarSections != saved { UserDefaults.standard.set(sidebarSections, forKey: key) }
         if snapshot.repository.integration != nil { showWorkInProgress() }
+    }
+
+    func activateWorktree(_ destination: RepositorySnapshot) {
+        if root != destination.repository.root {
+            worktreeDrafts[root] = WorktreeDraft(commit: commitDraft, batch: pendingCommitBatch, undo: switchUndo, redo: switchRedo)
+            let draft = worktreeDrafts.removeValue(forKey: destination.repository.root)
+            commitDraft = draft?.commit ?? CommitDraft()
+            pendingCommitBatch = draft?.batch
+            switchUndo = draft?.undo
+            switchRedo = draft?.redo
+            selection = .history
+            historySelection = nil
+            worktreeFileCommit = nil
+            commitJump = nil
+            diff = nil
+        }
+        snapshot = destination
+        if destination.repository.integration != nil { showWorkInProgress() }
+    }
+
+    func forgetWorktree(_ root: URL) {
+        worktreeDrafts.removeValue(forKey: root)
     }
 
     func showWorkInProgress() {
@@ -261,7 +293,7 @@ struct RepositoryTabs: View {
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(isSelected ? .isSelected : [])
-            .help(tab.id.path)
+            .help(tab.root.path)
 
             Button { model.closeTab(tab.id) } label: {
                 Image(systemName: "xmark")

@@ -82,12 +82,13 @@ struct GitWorktree: Identifiable, Equatable, Sendable {
     let branch: String
     let isMain: Bool
     let isLocked: Bool
+    let isPrunable: Bool
 
     static func otherCheckout(of branch: String, in worktrees: [Self], outside root: URL) -> Self? {
         let matches = worktrees.filter { $0.branch == branch }
         let here = root.resolvingSymlinksInPath().standardizedFileURL.path
         guard !matches.contains(where: { $0.id.resolvingSymlinksInPath().standardizedFileURL.path == here }) else { return nil }
-        return matches.first
+        return matches.first { !$0.isPrunable } ?? matches.first
     }
 }
 
@@ -117,25 +118,31 @@ struct GitStash: Identifiable, Hashable, Sendable {
 enum GitHistory {
     static func worktrees(in root: URL) async throws -> [GitWorktree] {
         let data = try await GitRepository.git(["worktree", "list", "--porcelain", "-z"], in: root)
-        var path: String?
-        var branch = "Detached HEAD"
-        var result: [GitWorktree] = []
-        var isMain = true
-        var locked = false
-        for field in data.split(separator: 0, omittingEmptySubsequences: false) {
-            let text = String(decoding: field, as: UTF8.self)
-            if text.hasPrefix("worktree ") { path = String(text.dropFirst(9)); branch = "Detached HEAD" }
-            else if text.hasPrefix("branch refs/heads/") { branch = String(text.dropFirst("branch refs/heads/".count)) }
-            else if text == "bare" { path = nil; isMain = false }
-            else if text == "locked" || text.hasPrefix("locked ") { locked = true }
-            else if text.isEmpty, let folder = path {
-                result.append(GitWorktree(id: URL(fileURLWithPath: folder, isDirectory: true), branch: branch, isMain: isMain, isLocked: locked))
-                path = nil
-                isMain = false
-                locked = false
+        return parseWorktrees(data)
+    }
+
+    static func registeredWorktrees(in commonDirectory: URL) async throws -> [GitWorktree] {
+        let data = try await GitRepository.git(
+            ["--git-dir", commonDirectory.path, "worktree", "list", "--porcelain", "-z"], in: commonDirectory
+        )
+        return parseWorktrees(data)
+    }
+
+    private static func parseWorktrees(_ data: Data) -> [GitWorktree] {
+        String(decoding: data, as: UTF8.self).components(separatedBy: "\0\0").enumerated()
+            .compactMap { index, record in
+                let fields = record.split(separator: "\0")
+                guard let path = fields.first, path.hasPrefix("worktree "), !fields.contains("bare") else { return nil }
+                let branchPrefix = "branch refs/heads/"
+                let branch = fields.first { $0.hasPrefix(branchPrefix) }.map { String($0.dropFirst(branchPrefix.count)) }
+                return GitWorktree(
+                    id: URL(fileURLWithPath: String(path.dropFirst("worktree ".count)), isDirectory: true).resolvingSymlinksInPath(),
+                    branch: branch ?? "Detached HEAD",
+                    isMain: index == 0,
+                    isLocked: fields.contains { $0 == "locked" || $0.hasPrefix("locked ") },
+                    isPrunable: fields.contains { $0 == "prunable" || $0.hasPrefix("prunable ") }
+                )
             }
-        }
-        return result
     }
 
     static func stashes(in root: URL) async throws -> [GitStash] {

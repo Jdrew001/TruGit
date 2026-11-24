@@ -46,8 +46,14 @@ struct GitRepository: Equatable, Sendable {
         return URL(fileURLWithPath: String(decoding: output.dropLast(), as: UTF8.self), isDirectory: true)
     }
 
+    static func commonDirectory(in root: URL) async throws -> URL {
+        let output = try await git(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: root)
+        guard output.last == 0x0A, output.count > 1 else { throw RepositoryReadError.invalidOutput }
+        return URL(fileURLWithPath: String(decoding: output.dropLast(), as: UTF8.self), isDirectory: true).resolvingSymlinksInPath()
+    }
+
     static func read(at folder: URL) async throws -> Self {
-        let root = try await workingTreeRoot(at: folder)
+        let root = try await workingTreeRoot(at: folder).resolvingSymlinksInPath()
         let status = try await git([
             "status", "--porcelain=v2", "--branch", "-z",
             "--untracked-files=all", "--ignore-submodules=none", "--renames",

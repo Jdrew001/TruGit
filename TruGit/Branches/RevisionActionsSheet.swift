@@ -180,7 +180,7 @@ struct RevisionActionsSheet: View {
                 }
             }
             if choices.contains(operation) {
-                Text(operation == .checkout && destinationWorktree != nil ? "Open the worktree where this branch is checked out." : operation.explanation(points.revision, points.branch)).font(.callout)
+                Text(operation == .checkout && destinationWorktree != nil ? "Switch this tab to the worktree where the branch is checked out." : operation.explanation(points.revision, points.branch)).font(.callout)
                     .foregroundStyle(operation == .forcePush ? Color.orange : .secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {

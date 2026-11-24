@@ -5,6 +5,7 @@ struct RepositorySnapshot: Identifiable, Sendable {
     let id = UUID()
     var worktreeRevision = UUID()
     let repository: GitRepository
+    let commonDirectory: URL
     let references: [RepositoryReference]
     let referenceBadges: [GraphReferenceBadge]
     let sidebarReferences: [RepositoryReference.Kind: [GraphReferenceBadge]]
@@ -13,9 +14,6 @@ struct RepositorySnapshot: Identifiable, Sendable {
     let remotes: [String]
     let stashes: [GitStash]
     let colors: BranchColors
-
-    // Git lists the main worktree first. Linked checkouts share its tracking refs.
-    var fetchGroup: URL { worktrees.first?.id ?? repository.root }
 
     func isCheckedOut(_ reference: RepositoryReference) -> Bool {
         reference.kind == .local && reference.name == repository.branch
@@ -33,7 +31,7 @@ struct RepositorySnapshot: Identifiable, Sendable {
     }
 
     func checkoutTitle(for branch: RepositoryReference) -> String {
-        if otherWorktree(for: branch.name) != nil { return "Open “" + branch.name + "” worktree" }
+        if otherWorktree(for: branch.name) != nil { return "Switch to “" + branch.name + "” worktree" }
         return "Switch to " + branch.name
     }
 
@@ -77,7 +75,8 @@ struct RepositorySnapshot: Identifiable, Sendable {
         GitWorktree.otherCheckout(of: branch, in: worktrees, outside: repository.root)
     }
 
-    init(repository: GitRepository, references: [RepositoryReference], operationTitle: String?, worktrees: [GitWorktree] = [], stashes: [GitStash] = [], remotes: [String] = []) {
+    init(repository: GitRepository, commonDirectory: URL, references: [RepositoryReference], operationTitle: String?, worktrees: [GitWorktree] = [], stashes: [GitStash] = [], remotes: [String] = []) {
+        self.commonDirectory = commonDirectory
         self.worktrees = worktrees
         self.remotes = remotes
         self.stashes = stashes
@@ -186,12 +185,27 @@ final class RepositoryModel {
         var restored: [RepositoryTab] = []
         var seen = Set<String>()
         var errors: [String] = []
+        let selectedPath = session.selectedPath
         for path in session.paths where path.hasPrefix("/") && seen.insert(path).inserted {
-            let folder = URL(fileURLWithPath: path, isDirectory: true)
             do {
-                let snapshot = try await Self.readSnapshot(at: folder)
-                guard snapshot.repository.root.path == path else { continue }
-                restored.append(RepositoryTab(snapshot: snapshot, alias: session.aliases[path]))
+                let snapshot = try await restoreSnapshot(for: path)
+                if let existing = restored.first(where: { $0.snapshot.commonDirectory == snapshot.commonDirectory }) {
+                    if path == selectedPath {
+                        existing.activateWorktree(snapshot)
+                        session.selectedPath = existing.id.path
+                    }
+                    if existing.alias == nil, let alias = session.aliases[path] {
+                        existing.alias = alias
+                        session.aliases[existing.id.path] = alias
+                    }
+                    session.removeTab(path)
+                    recordWorktree(for: existing)
+                } else {
+                    let tab = RepositoryTab(snapshot: snapshot, id: URL(fileURLWithPath: path, isDirectory: true),
+                                            alias: session.aliases[path])
+                    restored.append(tab)
+                    recordWorktree(for: tab)
+                }
             } catch {
                 errors.append(path + "\n" + error.localizedDescription)
             }
@@ -199,6 +213,27 @@ final class RepositoryModel {
         reportFolderErrors(errors, title: "Couldn’t Reopen Saved Repositories")
         tabs = restored
         activeID = restored.first { $0.id.path == session.selectedPath }?.id ?? restored.first?.id
+        session.selectedPath = activeID?.path
+        session.save()
+    }
+
+    private func restoreSnapshot(for path: String) async throws -> RepositorySnapshot {
+        let folder = URL(fileURLWithPath: path, isDirectory: true)
+        if let saved = session.worktreePaths[path], saved.hasPrefix("/"), saved != path {
+            let worktree = URL(fileURLWithPath: saved, isDirectory: true).resolvingSymlinksInPath()
+            if let snapshot = try? await Self.readSnapshot(at: worktree),
+               snapshot.repository.root == worktree {
+                let anchor = folder.resolvingSymlinksInPath()
+                if session.commonDirectories[path] == snapshot.commonDirectory.path || snapshot.worktrees.contains(where: { $0.id == anchor }) {
+                    return snapshot
+                }
+            }
+        }
+        let snapshot = try await Self.readSnapshot(at: folder)
+        guard snapshot.repository.root == folder.resolvingSymlinksInPath() else {
+            throw RepositoryReadError.commandFailed("The saved checkout no longer points to its repository.")
+        }
+        return snapshot
     }
 
     func setAlias(_ name: String, for tab: RepositoryTab) {
@@ -223,17 +258,18 @@ final class RepositoryModel {
 
     var activeFetchStatus: RepositoryFetchStatus? {
         guard let snapshot = activeTab?.snapshot, !snapshot.remotes.isEmpty else { return nil }
-        return automaticFetches[snapshot.fetchGroup]
+        return automaticFetches[snapshot.commonDirectory]
     }
 
     func fetchActiveRepositoryInBackground() {
         guard !isLoading, let tab = activeTab, !tab.snapshot.remotes.isEmpty else { return }
-        let group = tab.snapshot.fetchGroup
+        let group = tab.snapshot.commonDirectory
+        let root = tab.root
         guard automaticFetches[group]?.isDue ?? true else { return }
         automaticFetches[group] = .fetching
         Task(priority: .utility) {
             do {
-                try await GitRepository.fetchInBackground(in: tab.id)
+                try await GitRepository.fetchInBackground(in: root)
                 automaticFetches[group] = .fetched(.now)
             } catch {
                 automaticFetches[group] = .unavailable(.now)
@@ -276,7 +312,7 @@ final class RepositoryModel {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = true
-        panel.directoryURL = activeTab?.id.deletingLastPathComponent()
+        panel.directoryURL = activeTab?.root.deletingLastPathComponent()
         guard panel.runModal() == .OK else { return }
         addFolders(panel.urls, action: action)
     }
@@ -353,15 +389,15 @@ final class RepositoryModel {
         failure = Failure(title: title, message: errors.joined(separator: "\n\n"))
     }
 
-    func openFolder(_ folder: URL, inspectWorktree: Bool = false) {
-        load(folder) { self.showRepository($0, inspectWorktree: inspectWorktree) }
-    }
-
-    private func showRepository(_ snapshot: RepositorySnapshot, inspectWorktree: Bool = false) {
-        let tab = tab(for: snapshot)
-        if inspectWorktree {
-            tab.diff = nil
+    func switchWorktree(to root: URL, in tab: RepositoryTab) {
+        perform(failureTitle: "Couldn’t Switch Worktrees") {
+            try await self.readWorktree(at: root, from: tab.snapshot)
+        } onLoad: { snapshot in
+            let changed = tab.root != snapshot.repository.root
+            self.activateWorktree(snapshot, in: tab)
+            if changed { self.success = Success(message: "Switched to worktree for " + snapshot.repository.branch) }
             tab.selection = .history
+            tab.diff = nil
             tab.worktreeFileCommit = nil
             if !snapshot.repository.changes.isEmpty || snapshot.repository.integration != nil {
                 tab.showWorkInProgress()
@@ -371,28 +407,39 @@ final class RepositoryModel {
                 tab.historySelection = .commit(head)
             }
         }
-        selectTab(tab.id)
     }
 
-    private func tab(for snapshot: RepositorySnapshot, preserveSavedPosition: Bool = false) -> RepositoryTab {
-        let root = snapshot.repository.root
-        if let existing = tabs.first(where: { $0.id == root }) {
-            existing.snapshot = snapshot
+    private func showRepository(_ snapshot: RepositorySnapshot) {
+        selectTab(tab(for: snapshot).id)
+    }
+
+    private func tab(for snapshot: RepositorySnapshot) -> RepositoryTab {
+        if let existing = tabs.first(where: { $0.snapshot.commonDirectory == snapshot.commonDirectory }) {
+            activateWorktree(snapshot, in: existing)
             return existing
         }
-        let tab = RepositoryTab(snapshot: snapshot, alias: session.aliases[root.path])
-        if preserveSavedPosition, let index = session.paths.firstIndex(of: root.path) {
-            let preceding = Set(session.paths.prefix(index))
-            tabs.insert(tab, at: tabs.prefix { preceding.contains($0.id.path) }.count)
-        } else {
-            tabs.append(tab)
-            session.removeTab(root.path)
-            session.paths.append(root.path)
-        }
+        let root = snapshot.worktrees.first(where: \.isMain)?.id ?? snapshot.repository.root
+        let tab = RepositoryTab(snapshot: snapshot, id: root, alias: session.aliases[root.path])
+        tabs.append(tab)
+        if !session.paths.contains(root.path) { session.paths.append(root.path) }
+        recordWorktree(for: tab)
         return tab
     }
 
+    private func activateWorktree(_ snapshot: RepositorySnapshot, in tab: RepositoryTab) {
+        guard tabs.contains(where: { $0 === tab }) else { return }
+        tab.activateWorktree(snapshot)
+        recordWorktree(for: tab)
+        session.save()
+    }
+
+    private func recordWorktree(for tab: RepositoryTab) {
+        session.worktreePaths[tab.id.path] = tab.root.path
+        session.commonDirectories[tab.id.path] = tab.snapshot.commonDirectory.path
+    }
+
     func selectTab(_ root: URL) {
+        guard tabs.contains(where: { $0.id == root }) else { return }
         activeID = root
         session.revealTab(root.path)
         session.selectedPath = root.path
@@ -405,7 +452,7 @@ final class RepositoryModel {
 
     func closeTab(_ root: URL) {
         guard let index = tabs.firstIndex(where: { $0.id == root }) else { return }
-        if failure?.retry?.root == root { failure = nil }
+        if let retry = failure?.retry, retryTab(in: retry.root)?.id == root { failure = nil }
         tabs.remove(at: index)
         session.removeTab(root.path)
         if activeID == root {
@@ -419,32 +466,33 @@ final class RepositoryModel {
         guard let tab = activeTab else { return }
         guard !isLoading else { return }
         success = nil
-        load(tab.id) { snapshot in
+        load(tab.root) { snapshot in
             tab.snapshot = snapshot
-            self.success = Success(message: "Refreshed " + tab.id.lastPathComponent)
+            self.success = Success(message: "Refreshed " + tab.title)
         }
     }
 
     func observeActiveRepository() async {
         guard let tab = activeTab else { return }
-        let dirs = try? await GitRepository.git(["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], in: tab.id)
+        let root = tab.root
+        let dirs = try? await GitRepository.git(["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], in: root)
         let metadata = dirs.map { String(decoding: $0, as: UTF8.self).split(separator: "\n").map(String.init) } ?? []
-        let paths = Set([tab.id.path] + metadata.filter { !$0.hasPrefix(tab.id.path + "/") })
+        let paths = Set([root.path] + metadata.filter { !$0.hasPrefix(root.path + "/") })
         guard !Task.isCancelled, let events = RepositoryEvents(paths: Array(paths)) else { return }
         defer { events.stop() }
         var lastError: String?
         for await _ in events.updates {
             guard !Task.isCancelled else { break }
-            guard !isLoading else { continue }
+            guard !isLoading, tab.root == root else { continue }
             let original = tab.snapshot
             var latest: RepositorySnapshot
             do {
-                latest = try await Self.readSnapshot(at: tab.id)
+                latest = try await Self.readSnapshot(at: root)
             } catch {
-                guard !Task.isCancelled, !isLoading, activeID == tab.id else { continue }
+                guard !Task.isCancelled, !isLoading, activeID == tab.id, tab.root == root else { continue }
                 let message = error.localizedDescription
                 if message != lastError, failure == nil {
-                    failure = Failure(title: "Couldn’t Refresh " + tab.id.lastPathComponent, message: message)
+                    failure = Failure(title: "Couldn’t Refresh " + tab.title, message: message)
                     lastError = message
                 }
                 continue
@@ -461,19 +509,25 @@ final class RepositoryModel {
         }
     }
 
+    func canRetry(in root: URL) -> Bool { retryTab(in: root) != nil }
+
+    private func retryTab(in root: URL) -> RepositoryTab? {
+        tabs.first { tab in tab.root == root || tab.snapshot.worktrees.contains { $0.id == root && !$0.isPrunable } }
+    }
+
     func retryFailure(_ id: UUID) {
         guard !isLoading, let failure, failure.id == id, let retry = failure.retry,
-              let tab = tabs.first(where: { $0.id == retry.root }) else { return }
+              let tab = retryTab(in: retry.root) else { return }
         // Use the latest tip on the original branch. The normal action rechecks
         // HEAD and upstream against Git before it contacts the remote.
         let latest = tab.snapshot.references.first { $0.id == retry.branch.id && $0.upstreamID == retry.branch.upstreamID }
         let branch = latest ?? retry.branch
         selectTab(tab.id)
         let action = retry.exactPush ?? (retry.isPush ? .push(branch) : .pull(branch))
-        performBranchAction(action, in: tab, retrying: id)
+        performBranchAction(action, in: tab, retrying: id, retryRoot: retry.root)
     }
 
-    func performBranchAction(_ action: GitBranchAction, in sourceTab: RepositoryTab, retrying failureID: UUID? = nil) {
+    func performBranchAction(_ action: GitBranchAction, in tab: RepositoryTab, retrying failureID: UUID? = nil, retryRoot: URL? = nil) {
         guard !isLoading else { return }
         isLoading = true
 
@@ -484,11 +538,13 @@ final class RepositoryModel {
                 retryingFailureID = nil
                 isLoading = false
             }
-            let tab: RepositoryTab
             do {
-                if let owner = try await destinationWorktree(for: action, from: sourceTab) {
-                    tab = self.tab(for: owner)
-                    selectTab(tab.id)
+                if let retryRoot, retryRoot != tab.root {
+                    let original = try await readWorktree(at: retryRoot, from: tab.snapshot)
+                    activateWorktree(original, in: tab)
+                }
+                if let owner = try await destinationWorktree(for: action, from: tab) {
+                    activateWorktree(owner, in: tab)
                     let checkoutOnly: Bool
                     switch action {
                     case .switchTo: checkoutOnly = true
@@ -496,29 +552,30 @@ final class RepositoryModel {
                     default: checkoutOnly = false
                     }
                     if checkoutOnly {
-                        success = Success(message: "Opened worktree for " + owner.repository.branch)
-                        if owner.repository.integration == nil, tab.pendingCommitBatch == nil, let branch = owner.checkedOutBranch {
+                        success = Success(message: "Switched to worktree for " + owner.repository.branch)
+                        if owner.repository.integration != nil || !owner.repository.changes.isEmpty {
+                            tab.showWorkInProgress()
+                        } else if tab.pendingCommitBatch == nil, let branch = owner.checkedOutBranch {
                             tab.selectReference(branch)
                         }
                         return
                     }
-                } else {
-                    tab = sourceTab
                 }
             } catch {
                 failure = Failure(title: action.failureTitle, message: error.localizedDescription)
                 return
             }
             let before = tab.snapshot.repository
+            let root = before.root
             tab.pushingTo = action.pushDestination
-            let actionError = await runBranchAction(action, in: tab.id)
+            let actionError = await runBranchAction(action, in: root)
             if actionError == nil { success = Success(message: action.successMessage) }
             tab.pushingTo = nil
             let pushFailure = actionError as? CommitPushFailure
             let failureTitle = pushFailure == nil ? action.failureTitle : "Committed locally · Push failed"
-            let retry = pushFailure?.push.flatMap { RemoteRetry($0, in: tab.id, pinPush: true) }
+            let retry = pushFailure?.push.flatMap { RemoteRetry($0, in: root, pinPush: true) }
                 ?? (failureID != nil && failure?.id == failureID ? failure?.retry : nil)
-                ?? RemoteRetry(action, in: tab.id)
+                ?? RemoteRetry(action, in: root)
             if actionError == nil || pushFailure != nil, case .worktree(let work) = action {
                 tab.diff = nil
                 if case .commit = work { tab.commitDraft = CommitDraft() }
@@ -526,7 +583,7 @@ final class RepositoryModel {
             if case .deleteBranch(let deletion, _) = action, let tree = deletion.worktree {
                 do {
                     let refreshed = try await Self.readSnapshot(at: deletion.commandRoot)
-                    if reconcileRemovedWorktree(tree, with: refreshed) {
+                    if reconcileRemovedWorktree(tree, in: tab, with: refreshed) {
                         if let actionError { failure = Failure(title: action.failureTitle, message: actionError.localizedDescription) }
                         return
                     }
@@ -536,7 +593,7 @@ final class RepositoryModel {
                 }
             }
             do {
-                let snapshot = try await Self.readSnapshot(at: tab.id)
+                let snapshot = try await Self.readSnapshot(at: root)
                 tab.snapshot = snapshot
                 if actionError == nil {
                     if case .switchTo = action, before.branch != snapshot.repository.branch,
@@ -567,9 +624,6 @@ final class RepositoryModel {
                         tab.commitJump = CommitJump(commitID: head)
                     }
                 }
-                if tab.id != sourceTab.id {
-                    sourceTab.snapshot = try await Self.readSnapshot(at: sourceTab.id)
-                }
             } catch {
                 if let actionError {
                     failure = Failure(title: failureTitle, message: actionError.localizedDescription + "\n\nRefresh also failed.\n" + error.localizedDescription,
@@ -588,16 +642,10 @@ final class RepositoryModel {
         }
     }
 
-    private func reconcileRemovedWorktree(_ tree: GitWorktree, with snapshot: RepositorySnapshot) -> Bool {
-        guard !snapshot.worktrees.contains(where: { $0.id.path == tree.id.path }) else { return false }
-        let wasActive = activeID?.path == tree.id.path
-        if let removed = tabs.first(where: { $0.id.path == tree.id.path }) { closeTab(removed.id) }
-        if wasActive {
-            let surviving = tab(for: snapshot, preserveSavedPosition: true)
-            selectTab(surviving.id)
-        } else if let surviving = tabs.first(where: { $0.id == snapshot.repository.root }) {
-            surviving.snapshot = snapshot
-        }
+    private func reconcileRemovedWorktree(_ tree: GitWorktree, in tab: RepositoryTab, with snapshot: RepositorySnapshot) -> Bool {
+        guard !snapshot.worktrees.contains(where: { $0.id == tree.id }) else { return false }
+        activateWorktree(snapshot, in: tab)
+        tab.forgetWorktree(tree.id)
         return true
     }
 
@@ -613,22 +661,42 @@ final class RepositoryModel {
         default: return nil
         }
 
-        let worktrees = try await GitHistory.worktrees(in: tab.id)
-        let owner = GitWorktree.otherCheckout(of: branch, in: worktrees, outside: tab.id)
+        let worktrees = try await GitHistory.worktrees(in: tab.root)
+        let owner = GitWorktree.otherCheckout(of: branch, in: worktrees, outside: tab.root)
         if let revision, revision.operation != .checkout, revision.reviewedWorktree != owner?.id {
             throw RepositoryReadError.commandFailed("The worktree for “" + branch + "” changed. Review the destination again.")
         }
         guard let owner else { return nil }
-        guard FileManager.default.fileExists(atPath: owner.id.path) else {
-            throw RepositoryReadError.commandFailed("Git lists “" + branch + "” at " + owner.id.path + ", but the worktree folder is missing.")
-        }
-        let snapshot = try await Self.readSnapshot(at: owner.id)
-        guard snapshot.repository.root.resolvingSymlinksInPath() == owner.id.resolvingSymlinksInPath(),
-              snapshot.repository.branch == branch,
-              snapshot.worktrees.contains(where: { $0.id.resolvingSymlinksInPath() == tab.id.resolvingSymlinksInPath() }) else {
-            throw RepositoryReadError.commandFailed("Git’s worktree registration for “" + branch + "” no longer matches " + owner.id.path + ". Refresh and try again.")
+        let snapshot = try await readWorktree(owner, from: tab.snapshot)
+        guard snapshot.repository.branch == branch else {
+            throw RepositoryReadError.commandFailed("The branch in " + owner.id.path + " changed. Refresh and try again.")
         }
         if let revision, revision.operation == .checkout { try await revision.source.validate(in: owner.id) }
+        return snapshot
+    }
+
+    private func readWorktree(at root: URL, from source: RepositorySnapshot) async throws -> RepositorySnapshot {
+        let worktrees = try await GitHistory.registeredWorktrees(in: source.commonDirectory)
+        guard let worktree = worktrees.first(where: { $0.id == root }) else {
+            throw RepositoryReadError.commandFailed("Git no longer lists a worktree at " + root.path + ". Refresh and try again.")
+        }
+        return try await readWorktree(worktree, from: source)
+    }
+
+    private func readWorktree(_ worktree: GitWorktree, from source: RepositorySnapshot) async throws -> RepositorySnapshot {
+        let root = worktree.id
+        guard !worktree.isPrunable else {
+            throw RepositoryReadError.commandFailed("Git lists an unavailable worktree at " + root.path + ". Repair or remove its Git worktree registration, then refresh.")
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw RepositoryReadError.commandFailed("The registered worktree folder is missing at " + root.path + ".")
+        }
+        let snapshot = try await Self.readSnapshot(at: root)
+        guard snapshot.repository.root == root, snapshot.commonDirectory == source.commonDirectory,
+              snapshot.worktrees.contains(where: { $0.id == root && !$0.isPrunable }) else {
+            throw RepositoryReadError.commandFailed("The folder at " + root.path + " no longer matches this repository’s worktree registration.")
+        }
         return snapshot
     }
 
@@ -671,10 +739,11 @@ final class RepositoryModel {
             let subject = message?.components(separatedBy: .newlines).first ?? ""
             title = subject.hasPrefix("Merge ") && subject.contains(" into ") ? subject : "Merge into \(repository.branch)"
         }
+        async let commonDirectory = GitRepository.commonDirectory(in: repository.root)
         async let remotes = GitRepository.git(["remote"], in: repository.root)
         async let worktrees = GitHistory.worktrees(in: repository.root)
         async let stashes = GitHistory.stashes(in: repository.root)
-        return try await RepositorySnapshot(repository: repository, references: references, operationTitle: title,
+        return try await RepositorySnapshot(repository: repository, commonDirectory: commonDirectory, references: references, operationTitle: title,
                                             worktrees: worktrees, stashes: stashes,
                                             remotes: String(decoding: remotes, as: UTF8.self).split(separator: "\n").map(String.init))
     }

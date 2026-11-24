@@ -47,7 +47,8 @@ struct GraphBranchInspector: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
             if let local, let owner = snapshot.otherWorktree(for: local.name) {
-                Label("Checked out in " + owner.id.lastPathComponent, systemImage: "folder")
+                Label(owner.isPrunable ? "Unavailable worktree: " + owner.id.lastPathComponent : "Checked out in " + owner.id.lastPathComponent,
+                      systemImage: owner.isPrunable ? "exclamationmark.triangle" : "folder")
                     .font(.callout).lineLimit(2).truncationMode(.middle).help(owner.id.path)
             }
             if reference.kind != .tag {
